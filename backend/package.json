@@ -49,7 +49,7 @@
   "devDependencies": {
     "@nestjs/cli": "^10.0.0",
     "@nestjs/schematics": "^10.0.0",
-    "@nestjs/testing": "^11.1.18",
+    "@nestjs/testing": "^10.0.0",
     "@types/bcryptjs": "^2.4.2",
     "@types/jest": "^30.0.0",
     "@types/node": "^20.0.0",
