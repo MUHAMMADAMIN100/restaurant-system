@@ -252,12 +252,39 @@ a:hover { opacity: 0.8; }
 @media (min-width: 1024px) { .container-app { padding: 28px 24px; } }
 
 /* Hide on mobile */
-.hide-mobile  { display: none; }
-@media (min-width: 768px) { .hide-mobile { display: initial; } }
+.hide-mobile  { display: none !important; }
+@media (min-width: 768px) { .hide-mobile { display: revert !important; } }
 
 /* Show only on mobile */
-.show-mobile  { display: initial; }
-@media (min-width: 768px) { .show-mobile { display: none; } }
+.show-mobile  { display: revert !important; }
+@media (min-width: 768px) { .show-mobile { display: none !important; } }
+
+/* Mobile cart bar — only when sidebar is hidden (<1024px). Becomes flex when visible. */
+.mobile-cart-bar {
+  display: none !important;
+}
+@media (max-width: 1023px) {
+  .mobile-cart-bar { display: flex !important; }
+}
+
+/* Desktop cart sidebar — only at ≥1024px, where the 2-col grid is active */
+.cart-sidebar-desktop { display: none !important; }
+@media (min-width: 1024px) {
+  .cart-sidebar-desktop { display: block !important; }
+}
+
+/* Mobile spacer — only when mobile cart bar is visible */
+.show-mobile-spacer { display: none !important; }
+@media (max-width: 1023px) {
+  .show-mobile-spacer { display: block !important; }
+}
+
+/* When any modal is open, hide all sticky bars to avoid overlap */
+body.modal-open .show-mobile-sticky,
+body.modal-open .mobile-cart-bar,
+body.modal-open .show-mobile-spacer {
+  display: none !important;
+}
 
 /* Flex helpers */
 .flex-col-sm-row { display: flex; flex-direction: column; gap: 12px; }

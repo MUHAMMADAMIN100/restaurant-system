@@ -330,8 +330,8 @@ export default function WaiterView() {
             </div>
           </div>
 
-          {/* RIGHT (desktop) / hidden (mobile) — uses CartPanel below */}
-          <div className="hide-mobile" style={{ ...S.card, position: 'sticky', top: 76, border: '1px solid #2a2a2a' }}>
+          {/* RIGHT (desktop ≥1024px) / hidden on tablet & mobile — uses CartPanel below */}
+          <div className="cart-sidebar-desktop" style={{ ...S.card, position: 'sticky', top: 76, border: '1px solid #2a2a2a' }}>
             <CartPanel
               cartItems={cartItems} cartQty={cartQty} cartTotal={cartTotal}
               tableNumber={tableNumber} setTableNumber={setTableNumber}
@@ -346,7 +346,7 @@ export default function WaiterView() {
 
       {/* MOBILE: bottom sticky cart bar */}
       {tab === 'new' && (
-        <div className="show-mobile anim-fade-up" style={{
+        <div className="show-mobile mobile-cart-bar anim-fade-up" style={{
           position: 'fixed',
           bottom: 0, left: 0, right: 0,
           background: 'linear-gradient(180deg, #0a0a0a, #050505)',
@@ -354,7 +354,6 @@ export default function WaiterView() {
           padding: '12px 16px calc(12px + env(safe-area-inset-bottom))',
           zIndex: 50,
           boxShadow: '0 -8px 24px rgba(0,0,0,0.6)',
-          display: 'flex',
           alignItems: 'center',
           gap: 12,
         }}>
@@ -394,7 +393,7 @@ export default function WaiterView() {
       )}
 
       {/* Add bottom padding on mobile to clear sticky cart */}
-      {tab === 'new' && <div className="show-mobile" style={{ height: 80 }} />}
+      {tab === 'new' && <div className="show-mobile show-mobile-spacer" style={{ height: 80 }} />}
     </div>
   );
 }

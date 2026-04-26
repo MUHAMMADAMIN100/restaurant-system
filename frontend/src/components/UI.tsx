@@ -14,9 +14,11 @@ export const Modal = memo(function Modal({ title, onClose, children, maxWidth = 
     document.addEventListener('keydown', onKey);
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
+    document.body.classList.add('modal-open');
     return () => {
       document.removeEventListener('keydown', onKey);
       document.body.style.overflow = prevOverflow;
+      document.body.classList.remove('modal-open');
     };
   }, [onClose]);
 
