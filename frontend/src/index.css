@@ -322,19 +322,35 @@ a:hover { opacity: 0.8; }
 
 /* ───────────────────────────────────────────────── MODAL ─────── */
 
+/* Bulletproof centering:
+ * - Fixed positioning relative to viewport (not parent transforms)
+ * - display: grid + place-items: center  → most reliable centering
+ * - 100dvh for dynamic viewport (mobile keyboard friendly)
+ * - inset: 0 + width/height: 100% as a belt-and-suspenders approach
+ */
 .modal-backdrop {
   position: fixed;
-  inset: 0;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100vw;
+  width: 100dvw;
+  height: 100vh;
+  height: 100dvh;
   background: rgba(0, 0, 0, 0.85);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
-  z-index: 1000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  z-index: 9999;
+  display: grid;
+  place-items: center;
   padding: 16px;
-  height: 100dvh;
   overflow: hidden;
+  /* Safe-area awareness for notch devices (desktop ignores) */
+  padding-top:    max(16px, env(safe-area-inset-top));
+  padding-bottom: max(16px, env(safe-area-inset-bottom));
+  padding-left:   max(16px, env(safe-area-inset-left));
+  padding-right:  max(16px, env(safe-area-inset-right));
 }
 
 .modal-card {
@@ -343,25 +359,14 @@ a:hover { opacity: 0.8; }
   border-radius: 14px;
   width: 100%;
   max-width: var(--modal-max-width, 480px);
+  /* Available height = viewport minus padding */
   max-height: calc(100dvh - 32px);
   display: flex;
   flex-direction: column;
   box-shadow: 0 32px 90px rgba(0, 0, 0, 0.7);
   overflow: hidden;
-}
-
-/* Tablet: nicer width */
-@media (min-width: 768px) and (max-width: 1199px) {
-  .modal-card {
-    max-width: min(var(--modal-max-width, 480px), 92vw);
-  }
-}
-
-/* Large desktop: cap width but keep it readable */
-@media (min-width: 1200px) {
-  .modal-card {
-    max-width: min(calc(var(--modal-max-width, 480px) * 1.1), 640px);
-  }
+  /* Auto-margins inside grid prevent any unexpected stretching */
+  margin: 0 auto;
 }
 
 .modal-header {
@@ -384,39 +389,51 @@ a:hover { opacity: 0.8; }
   min-height: 0;
 }
 
-/* Compact form spacing inside modal */
+/* iOS auto-zoom prevention */
 .modal-body input,
 .modal-body select,
 .modal-body textarea {
-  font-size: 16px; /* prevents iOS auto-zoom on focus */
+  font-size: 16px;
 }
 
-/* Mobile: full-height bottom sheet */
+/* Tablet: ensure modal doesn't exceed viewport */
+@media (min-width: 641px) and (max-width: 1199px) {
+  .modal-card {
+    max-width: min(var(--modal-max-width, 480px), 92vw);
+  }
+}
+
+/* Large desktop: slightly wider for complex forms */
+@media (min-width: 1200px) {
+  .modal-card {
+    max-width: min(calc(var(--modal-max-width, 480px) * 1.15), 680px);
+  }
+}
+
+/* Mobile: bottom-sheet style */
 @media (max-width: 640px) {
   .modal-backdrop {
-    align-items: flex-end;
+    align-items: end;
+    place-items: end center;
     padding: 0;
+    padding-bottom: 0;
   }
 
   .modal-card {
     max-width: 100%;
     width: 100%;
-    /* Almost full screen — gives lots of room for forms */
     max-height: calc(100dvh - 8px);
-    height: calc(100dvh - 8px);
     border-radius: 18px 18px 0 0;
     border-bottom: none;
+    margin: 0;
     animation: slideUpSheet 0.3s var(--ease-out) both;
   }
 
   .modal-header {
-    padding: 18px 18px 12px;
+    padding: 22px 18px 12px;
     position: relative;
-    /* Make space for drag handle */
-    padding-top: 22px;
   }
 
-  /* Drag handle indicator at the top */
   .modal-header::before {
     content: '';
     position: absolute;

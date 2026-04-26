@@ -1,4 +1,5 @@
 import { useEffect, useState, memo, type ReactNode, type CSSProperties } from 'react';
+import { createPortal } from 'react-dom';
 
 interface ModalProps {
   title: string;
@@ -11,14 +12,17 @@ export const Modal = memo(function Modal({ title, onClose, children, maxWidth = 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('keydown', onKey);
+    const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {
       document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = '';
+      document.body.style.overflow = prevOverflow;
     };
   }, [onClose]);
 
-  return (
+  // Render into document.body via portal — escapes any parent stacking/transform context
+  // so the modal is always perfectly centered relative to the viewport.
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
@@ -49,7 +53,8 @@ export const Modal = memo(function Modal({ title, onClose, children, maxWidth = 
           {children}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 });
 
