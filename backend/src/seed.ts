@@ -77,7 +77,7 @@ async function seed() {
       // ── Горячие блюда ────────────────────────────────────────────────────
       {
         name: 'Плов по-узбекски',
-        price: 48000,
+        price: 55,
         categoryId: hot.id,
         isAvailable: true,
         description: 'Классический узбекский плов из длиннозёрного риса с бараниной, морковью, луком и восточными специями. Готовится в казане на открытом огне.',
@@ -85,7 +85,7 @@ async function seed() {
       },
       {
         name: 'Лагман домашний',
-        price: 42000,
+        price: 45,
         categoryId: hot.id,
         isAvailable: true,
         description: 'Тянутая лапша ручной работы с говядиной, болгарским перцем, помидорами, луком и чесноком в насыщенном соусе зирвак.',
@@ -93,7 +93,7 @@ async function seed() {
       },
       {
         name: 'Манты с бараниной (6 шт.)',
-        price: 38000,
+        price: 50,
         categoryId: hot.id,
         isAvailable: true,
         description: 'Паровые манты с сочной начинкой из рубленой баранины, лука и зиры. Подаются со свежей сметаной и зеленью.',
@@ -101,7 +101,7 @@ async function seed() {
       },
       {
         name: 'Дамлама',
-        price: 45000,
+        price: 70,
         categoryId: hot.id,
         isAvailable: true,
         description: 'Томлёное мясо с картофелем, капустой, помидорами и зеленью в казане — блюдо из сезонных овощей с бараньими рёбрышками.',
@@ -109,7 +109,7 @@ async function seed() {
       },
       {
         name: 'Димлама с говядиной',
-        price: 46000,
+        price: 75,
         categoryId: hot.id,
         isAvailable: false,
         description: 'Говядина медленного томления с картофелем, луком и ароматными специями. Подаётся в горшочке.',
@@ -117,7 +117,7 @@ async function seed() {
       },
       {
         name: 'Нарын',
-        price: 36000,
+        price: 60,
         categoryId: hot.id,
         isAvailable: true,
         description: 'Тонко нарезанное варёное тесто с отварной кониной или бараниной, луком и чёрным перцем.',
@@ -127,7 +127,7 @@ async function seed() {
       // ── Супы ─────────────────────────────────────────────────────────────
       {
         name: 'Шурпа из баранины',
-        price: 35000,
+        price: 40,
         categoryId: soup.id,
         isAvailable: true,
         description: 'Наваристый бульон с крупными кусками баранины на кости, картофелем, морковью и свежей зеленью. Подаётся в порционной касе.',
@@ -135,7 +135,7 @@ async function seed() {
       },
       {
         name: 'Мастава',
-        price: 30000,
+        price: 30,
         categoryId: soup.id,
         isAvailable: true,
         description: 'Густой суп с рисом, говядиной, репой и помидорами. Традиционный суп узбекской кухни.',
@@ -143,7 +143,7 @@ async function seed() {
       },
       {
         name: 'Нохот шурпа',
-        price: 32000,
+        price: 35,
         categoryId: soup.id,
         isAvailable: true,
         description: 'Наваристый суп из нута с бараниной и свежими овощами. Насыщенный вкус и аромат.',
@@ -151,7 +151,7 @@ async function seed() {
       },
       {
         name: 'Машхурда',
-        price: 28000,
+        price: 28,
         categoryId: soup.id,
         isAvailable: true,
         description: 'Суп из маша (зелёного гороха) с рисом, мясом и курдючным салом. Питательный и согревающий.',
@@ -161,7 +161,7 @@ async function seed() {
       // ── Закуски ───────────────────────────────────────────────────────────
       {
         name: 'Самса с мясом (2 шт.)',
-        price: 22000,
+        price: 24,
         categoryId: starter.id,
         isAvailable: true,
         description: 'Слоёные треугольники из тандырного теста с начинкой из рубленой баранины, лука и зиры. Выпекаются в тандыре.',
@@ -169,7 +169,7 @@ async function seed() {
       },
       {
         name: 'Сырная тарелка',
-        price: 42000,
+        price: 120,
         categoryId: starter.id,
         isAvailable: true,
         description: 'Подборка из 4 видов сыров: пармезан, бри, дор блю, чеддер. Подаётся с виноградом, орехами и мёдом.',
@@ -177,7 +177,7 @@ async function seed() {
       },
       {
         name: 'Закуска из баклажан',
-        price: 28000,
+        price: 32,
         categoryId: starter.id,
         isAvailable: true,
         description: 'Жареные баклажаны с чесноком, помидорами, болгарским перцем и зеленью кинзы.',
@@ -185,7 +185,7 @@ async function seed() {
       },
       {
         name: 'Ачичук',
-        price: 18000,
+        price: 18,
         categoryId: starter.id,
         isAvailable: true,
         description: 'Традиционная узбекская закуска из свежих помидоров, лука и чёрного перца с кинзой.',
@@ -195,7 +195,7 @@ async function seed() {
       // ── Салаты ────────────────────────────────────────────────────────────
       {
         name: 'Салат Ташкент',
-        price: 28000,
+        price: 38,
         categoryId: salad.id,
         isAvailable: true,
         description: 'Редька, отварная говядина, жареный лук и зелень с лёгкой заправкой из масла. Традиционный узбекский вкус.',
@@ -203,7 +203,7 @@ async function seed() {
       },
       {
         name: 'Греческий салат',
-        price: 24000,
+        price: 35,
         categoryId: salad.id,
         isAvailable: true,
         description: 'Помидоры черри, огурцы, оливки каламата, болгарский перец, красный лук и сыр фета с оливковым маслом и орегано.',
@@ -211,7 +211,7 @@ async function seed() {
       },
       {
         name: 'Цезарь с курицей',
-        price: 32000,
+        price: 55,
         categoryId: salad.id,
         isAvailable: true,
         description: 'Листья романо, куриное филе гриль, гренки, пармезан и фирменный соус Цезарь.',
@@ -219,7 +219,7 @@ async function seed() {
       },
       {
         name: 'Шакарob',
-        price: 20000,
+        price: 20,
         categoryId: salad.id,
         isAvailable: true,
         description: 'Классический свежий салат из помидоров и лука с уксусом и чёрным перцем. Идеальное дополнение к плову и мясу.',
@@ -227,7 +227,7 @@ async function seed() {
       },
       {
         name: 'Овощной микс',
-        price: 22000,
+        price: 28,
         categoryId: salad.id,
         isAvailable: false,
         description: 'Сезонные овощи: огурцы, помидоры, болгарский перец, редис, зелень — с домашней заправкой.',
@@ -237,7 +237,7 @@ async function seed() {
       // ── Гриль ─────────────────────────────────────────────────────────────
       {
         name: 'Шашлык из баранины (300г)',
-        price: 72000,
+        price: 220,
         categoryId: grill.id,
         isAvailable: true,
         description: 'Отборная корейка ягнёнка, маринованная в луке, специях и уксусе. Обжаривается на мангале над углями. Подаётся с луком и зеленью.',
@@ -245,7 +245,7 @@ async function seed() {
       },
       {
         name: 'Шашлык из говядины (300г)',
-        price: 68000,
+        price: 180,
         categoryId: grill.id,
         isAvailable: true,
         description: 'Нежные кусочки говяжьей вырезки на шпажках, маринованные с луком и специями. Сочные и ароматные.',
@@ -253,7 +253,7 @@ async function seed() {
       },
       {
         name: 'Люля-кебаб (300г)',
-        price: 62000,
+        price: 160,
         categoryId: grill.id,
         isAvailable: true,
         description: 'Фарш из баранины с курдючным жиром, луком и зеленью, нанизанный на широкие шампуры и обжаренный на мангале.',
@@ -261,7 +261,7 @@ async function seed() {
       },
       {
         name: 'Курица тандыр (полупорция)',
-        price: 58000,
+        price: 140,
         categoryId: grill.id,
         isAvailable: true,
         description: 'Цыплёнок, запечённый в тандыре с травами и специями. Румяная корочка, нежное мясо.',
@@ -271,7 +271,7 @@ async function seed() {
       // ── Десерты ────────────────────────────────────────────────────────────
       {
         name: 'Пахлава (порция 6 шт.)',
-        price: 22000,
+        price: 30,
         categoryId: dessert.id,
         isAvailable: true,
         description: 'Хрустящее слоёное тесто с грецкими орехами, пропитанное сахарным сиропом с розовой водой и кардамоном.',
@@ -279,7 +279,7 @@ async function seed() {
       },
       {
         name: 'Чак-чак',
-        price: 18000,
+        price: 25,
         categoryId: dessert.id,
         isAvailable: true,
         description: 'Традиционная восточная сладость — жареные колечки из теста, политые горячим мёдом с орехами.',
@@ -287,7 +287,7 @@ async function seed() {
       },
       {
         name: 'Мороженое (2 шарика)',
-        price: 16000,
+        price: 22,
         categoryId: dessert.id,
         isAvailable: true,
         description: 'Два шарика пломбира на выбор: ваниль, шоколад, клубника, фисташки. Подаётся с вафельным рожком.',
@@ -295,7 +295,7 @@ async function seed() {
       },
       {
         name: 'Шоколадный фондан',
-        price: 28000,
+        price: 38,
         categoryId: dessert.id,
         isAvailable: true,
         description: 'Тёплый шоколадный кекс с жидкой начинкой, подаётся с шариком ванильного мороженого.',
@@ -305,7 +305,7 @@ async function seed() {
       // ── Напитки ────────────────────────────────────────────────────────────
       {
         name: 'Чай зелёный (чайник 0,6 л)',
-        price: 10000,
+        price: 12,
         categoryId: drink.id,
         isAvailable: true,
         description: 'Зелёный чай из листьев первого сбора. Подаётся в узбекском чайнике с пиалой.',
@@ -313,7 +313,7 @@ async function seed() {
       },
       {
         name: 'Чай чёрный (чайник 0,6 л)',
-        price: 10000,
+        price: 12,
         categoryId: drink.id,
         isAvailable: true,
         description: 'Крепкий чёрный чай с кусочком сахара и лимоном.',
@@ -321,7 +321,7 @@ async function seed() {
       },
       {
         name: 'Свежевыжатый сок (300 мл)',
-        price: 18000,
+        price: 25,
         categoryId: drink.id,
         isAvailable: true,
         description: 'Апельсин, яблоко, морковь или гранат на выбор. Выжимается при заказе.',
@@ -329,7 +329,7 @@ async function seed() {
       },
       {
         name: 'Айран (300 мл)',
-        price: 10000,
+        price: 10,
         categoryId: drink.id,
         isAvailable: true,
         description: 'Охлаждённый кисломолочный напиток из натурального йогурта с щепоткой соли. Освежает и утоляет жажду.',
@@ -337,7 +337,7 @@ async function seed() {
       },
       {
         name: 'Кола / Пепси (0,5 л)',
-        price: 12000,
+        price: 12,
         categoryId: drink.id,
         isAvailable: true,
         description: 'Охлаждённый газированный напиток.',
@@ -345,7 +345,7 @@ async function seed() {
       },
       {
         name: 'Минеральная вода (0,5 л)',
-        price: 8000,
+        price: 8,
         categoryId: drink.id,
         isAvailable: true,
         description: 'Газированная или негазированная горная вода.',
@@ -355,7 +355,7 @@ async function seed() {
       // ── Хлеб и выпечка ────────────────────────────────────────────────────
       {
         name: 'Нон (лепёшка тандыр)',
-        price: 8000,
+        price: 5,
         categoryId: bread.id,
         isAvailable: true,
         description: 'Свежеиспечённая узбекская лепёшка из тандыра — хрустящая снаружи и мягкая внутри с кунжутом.',
@@ -363,7 +363,7 @@ async function seed() {
       },
       {
         name: 'Самса с картошкой (2 шт.)',
-        price: 18000,
+        price: 16,
         categoryId: bread.id,
         isAvailable: true,
         description: 'Слоёные треугольники с начинкой из картофеля, лука и зелени. Хрустящее тесто, нежная начинка.',
@@ -371,7 +371,7 @@ async function seed() {
       },
       {
         name: 'Гата (сладкая лепёшка)',
-        price: 14000,
+        price: 18,
         categoryId: bread.id,
         isAvailable: true,
         description: 'Армянская слоёная выпечка с ореховой начинкой из грецких орехов, масла и сахара.',

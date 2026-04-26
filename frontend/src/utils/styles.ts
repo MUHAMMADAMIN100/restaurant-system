@@ -1,8 +1,14 @@
 import type { OrderStatus } from '../api/client';
 import type { CSSProperties } from 'react';
 
-export const fmt = (n: number): string =>
-  new Intl.NumberFormat('ru-RU').format(Math.round(n)) + ' сум';
+export const fmt = (n: number): string => {
+  const num = Number(n) || 0;
+  // Show decimals only when not a round number
+  const formatted = num % 1 === 0
+    ? new Intl.NumberFormat('ru-RU').format(num)
+    : new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(num);
+  return `${formatted} с.`;
+};
 
 export const timeAgo = (iso: string): string => {
   const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);

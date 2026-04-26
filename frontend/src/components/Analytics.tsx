@@ -177,30 +177,43 @@ const RevenueChart = memo(function RevenueChart({ days }: { days: DayBucket[] })
       </div>
 
       {total === 0 ? <EmptyState icon="📈" text="Нет продаж в этом периоде" /> : (
-        <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 4, height: 180, paddingTop: 8 }}>
-          {days.map((d) => {
-            const h = max > 0 ? (d.revenue / max) * 100 : 0;
-            const date = new Date(d.date);
-            const label = date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
-            return (
-              <div key={d.date} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                <div style={{ fontSize: 10, color: d.revenue > 0 ? '#f59e0b' : '#2a2a2a', fontWeight: 600, opacity: d.revenue > 0 ? 1 : 0.4 }}>
-                  {d.revenue > 0 ? formatShort(d.revenue) : '·'}
+        <div style={{ overflowX: 'auto', overflowY: 'hidden', WebkitOverflowScrolling: 'touch', margin: '0 -6px', padding: '0 6px' }}>
+          <div style={{
+            display: 'flex', alignItems: 'flex-end', justifyContent: days.length <= 14 ? 'space-between' : 'flex-start',
+            gap: 4, height: 180, paddingTop: 8,
+            minWidth: days.length > 14 ? `${days.length * 24}px` : '100%',
+          }}>
+            {days.map((d, i) => {
+              const h = max > 0 ? (d.revenue / max) * 100 : 0;
+              const date = new Date(d.date);
+              const label = date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+              // Skip some labels when there are many days
+              const labelStep = days.length > 21 ? 5 : days.length > 14 ? 3 : 1;
+              const showLabel = i === days.length - 1 || i === 0 || i % labelStep === 0;
+              return (
+                <div key={d.date} style={{
+                  flex: days.length <= 14 ? 1 : '0 0 auto',
+                  width: days.length > 14 ? 22 : undefined,
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, minWidth: 0,
+                }}>
+                  <div style={{ fontSize: 9, color: d.revenue > 0 ? '#f59e0b' : '#2a2a2a', fontWeight: 600, opacity: d.revenue > 0 ? 1 : 0.4, whiteSpace: 'nowrap' }}>
+                    {d.revenue > 0 ? formatShort(d.revenue) : '·'}
+                  </div>
+                  <div title={`${label}: ${fmt(d.revenue)} (${d.orders} зак.)`} style={{
+                    width: '100%', maxWidth: 36,
+                    height: `${Math.max(h, 2)}%`,
+                    background: d.revenue > 0 ? 'linear-gradient(180deg, #f59e0b, #b45309)' : '#1a1a1a',
+                    borderRadius: '4px 4px 0 0',
+                    transition: 'height 0.6s var(--ease-out)',
+                    minHeight: 2,
+                  }} />
+                  <div style={{ fontSize: 9, color: '#4b5563', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', width: '100%', textAlign: 'center', minHeight: 12 }}>
+                    {showLabel ? label : ''}
+                  </div>
                 </div>
-                <div title={`${label}: ${fmt(d.revenue)} (${d.orders} зак.)`} style={{
-                  width: '100%', maxWidth: 36,
-                  height: `${Math.max(h, 2)}%`,
-                  background: d.revenue > 0 ? 'linear-gradient(180deg, #f59e0b, #b45309)' : '#1a1a1a',
-                  borderRadius: '4px 4px 0 0',
-                  transition: 'height 0.6s var(--ease-out)',
-                  minHeight: 2,
-                }} />
-                <div style={{ fontSize: 9, color: '#4b5563', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', width: '100%', textAlign: 'center' }}>
-                  {label}
-                </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       )}
     </div>
@@ -324,27 +337,29 @@ const HourActivity = memo(function HourActivity({ hours }: { hours: HourBucket[]
         )}
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 2, height: 110 }}>
-        {hours.map((h) => {
-          const height = max > 0 ? (h.count / max) * 100 : 0;
-          const isPeak = h === peak && peak.count > 0;
-          return (
-            <div key={h.hour} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, minWidth: 0 }}>
-              <div title={`${String(h.hour).padStart(2, '0')}:00 — ${h.count} заказов, ${fmt(h.revenue)}`} style={{
-                width: '70%',
-                height: `${Math.max(height, 2)}%`,
-                background: h.count === 0 ? '#161616' : isPeak ? '#f59e0b' : '#3b82f6',
-                opacity: h.count === 0 ? 0.4 : 1,
-                borderRadius: '3px 3px 0 0',
-                transition: 'height 0.6s var(--ease-out)',
-                minHeight: 2,
-              }} />
-              {h.hour % 3 === 0 && (
-                <div style={{ fontSize: 9, color: '#4b5563' }}>{String(h.hour).padStart(2, '0')}</div>
-              )}
-            </div>
-          );
-        })}
+      <div style={{ overflowX: 'auto', overflowY: 'hidden', WebkitOverflowScrolling: 'touch', margin: '0 -6px', padding: '0 6px' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 2, height: 110, minWidth: 480 }}>
+          {hours.map((h) => {
+            const height = max > 0 ? (h.count / max) * 100 : 0;
+            const isPeak = h === peak && peak.count > 0;
+            return (
+              <div key={h.hour} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, minWidth: 14 }}>
+                <div title={`${String(h.hour).padStart(2, '0')}:00 — ${h.count} заказов, ${fmt(h.revenue)}`} style={{
+                  width: '70%',
+                  height: `${Math.max(height, 2)}%`,
+                  background: h.count === 0 ? '#161616' : isPeak ? '#f59e0b' : '#3b82f6',
+                  opacity: h.count === 0 ? 0.4 : 1,
+                  borderRadius: '3px 3px 0 0',
+                  transition: 'height 0.6s var(--ease-out)',
+                  minHeight: 2,
+                }} />
+                {h.hour % 3 === 0 && (
+                  <div style={{ fontSize: 9, color: '#4b5563' }}>{String(h.hour).padStart(2, '0')}</div>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
@@ -401,7 +416,7 @@ const TopTablesCard = memo(function TopTablesCard({ tables }: { tables: TableBuc
   return (
     <div className="anim-fade-up" style={{ ...S.card }}>
       <h3 style={{ margin: '0 0 18px', fontFamily: "'Playfair Display', serif", color: '#e5e7eb', fontSize: 17 }}>Топ столов</h3>
-      <div className="stagger" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 10 }}>
+      <div className="stagger" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))', gap: 10 }}>
         {tables.map((t, i) => (
           <div key={t.table} className="anim-fade-up card-hover" style={{
             background: '#1a1a1a', border: '1px solid #262626',

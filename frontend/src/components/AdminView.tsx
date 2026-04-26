@@ -194,8 +194,8 @@ const MenuTab = memo(function MenuTab({ menu, categories, onCreate, onUpdate, on
             </div>
             <div className="grid-cols-12">
               <div>
-                <label style={S.label}>Цена (сум)</label>
-                <input style={S.input} type="number" value={form.price} onChange={(e) => set('price', e.target.value)} placeholder="45000" min="1" />
+                <label style={S.label}>Цена (сомони)</label>
+                <input style={S.input} type="number" step="0.01" value={form.price} onChange={(e) => set('price', e.target.value)} placeholder="55" min="0.01" />
               </div>
               <div>
                 <label style={S.label}>Категория</label>
