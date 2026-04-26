@@ -175,7 +175,7 @@ const MenuTab = memo(function MenuTab({ menu, categories, onCreate, onUpdate, on
       </div>
 
       {modal && (
-        <Modal title={modal === 'new' ? 'Новое блюдо' : 'Изменить блюдо'} onClose={() => setModal(null)}>
+        <Modal title={modal === 'new' ? 'Новое блюдо' : 'Изменить блюдо'} onClose={() => setModal(null)} maxWidth={560}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div>
               <label style={S.label}>Название блюда</label>

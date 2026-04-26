@@ -350,6 +350,20 @@ a:hover { opacity: 0.8; }
   overflow: hidden;
 }
 
+/* Tablet: nicer width */
+@media (min-width: 768px) and (max-width: 1199px) {
+  .modal-card {
+    max-width: min(var(--modal-max-width, 480px), 92vw);
+  }
+}
+
+/* Large desktop: cap width but keep it readable */
+@media (min-width: 1200px) {
+  .modal-card {
+    max-width: min(calc(var(--modal-max-width, 480px) * 1.1), 640px);
+  }
+}
+
 .modal-header {
   display: flex;
   justify-content: space-between;
@@ -368,6 +382,13 @@ a:hover { opacity: 0.8; }
   overscroll-behavior: contain;
   flex: 1 1 auto;
   min-height: 0;
+}
+
+/* Compact form spacing inside modal */
+.modal-body input,
+.modal-body select,
+.modal-body textarea {
+  font-size: 16px; /* prevents iOS auto-zoom on focus */
 }
 
 /* Mobile: full-height bottom sheet */

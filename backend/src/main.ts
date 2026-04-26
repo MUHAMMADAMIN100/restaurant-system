@@ -3,6 +3,81 @@ import { NestFactory, HttpAdapterHost } from '@nestjs/core';
 import { ValidationPipe, HttpException, HttpStatus, Catch, ArgumentsHost, ExceptionFilter } from '@nestjs/common';
 import { AppModule } from './app.module';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { getDataSourceToken } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
+import { MenuItem } from './menu/menu-item.entity';
+
+// One-time auto-migration: convert legacy UZS prices (>500) to realistic TJS values.
+// Idempotent: only runs if any item has price > 500.
+const TJS_PRICES: Record<string, number> = {
+  'Плов по-узбекски':           55,
+  'Лагман домашний':            45,
+  'Манты с бараниной (6 шт.)':  50,
+  'Дамлама':                    70,
+  'Димлама с говядиной':        75,
+  'Нарын':                      60,
+  'Шурпа из баранины':          40,
+  'Мастава':                    30,
+  'Нохот шурпа':                35,
+  'Машхурда':                   28,
+  'Самса с мясом (2 шт.)':      24,
+  'Сырная тарелка':            120,
+  'Закуска из баклажан':        32,
+  'Ачичук':                     18,
+  'Салат Ташкент':              38,
+  'Греческий салат':            35,
+  'Цезарь с курицей':           55,
+  'Шакарob':                    20,
+  'Овощной микс':               28,
+  'Шашлык из баранины (300г)': 220,
+  'Шашлык из говядины (300г)': 180,
+  'Люля-кебаб (300г)':         160,
+  'Курица тандыр (полупорция)':140,
+  'Пахлава (порция 6 шт.)':     30,
+  'Чак-чак':                    25,
+  'Мороженое (2 шарика)':       22,
+  'Шоколадный фондан':          38,
+  'Чай зелёный (чайник 0,6 л)': 12,
+  'Чай чёрный (чайник 0,6 л)':  12,
+  'Свежевыжатый сок (300 мл)':  25,
+  'Айран (300 мл)':             10,
+  'Кола / Пепси (0,5 л)':       12,
+  'Минеральная вода (0,5 л)':    8,
+  'Нон (лепёшка тандыр)':        5,
+  'Самса с картошкой (2 шт.)':  16,
+  'Гата (сладкая лепёшка)':     18,
+};
+
+async function migratePrices(app: any) {
+  try {
+    const ds: DataSource = app.get(getDataSourceToken());
+    const repo = ds.getRepository(MenuItem);
+    const all: MenuItem[] = await repo.find();
+    const hasLegacy = all.some((it: MenuItem) => Number(it.price) > 500);
+    if (!hasLegacy) {
+      console.log('💰 Price migration: no legacy prices detected, skipping.');
+      return;
+    }
+    console.log('💰 Price migration: legacy UZS prices detected — updating to TJS...');
+    let updated = 0;
+    let capped = 0;
+    for (const item of all) {
+      const known = TJS_PRICES[item.name];
+      if (known !== undefined) {
+        await repo.update(item.id, { price: known });
+        updated++;
+      } else if (Number(item.price) > 500) {
+        // Unknown name: cap large values by dividing by 1000 (rough UZS→TJS conversion)
+        const newPrice = Math.min(Math.max(Math.round(Number(item.price) / 1000), 5), 350);
+        await repo.update(item.id, { price: newPrice });
+        capped++;
+      }
+    }
+    console.log(`💰 Price migration done: ${updated} matched by name, ${capped} capped by formula.`);
+  } catch (e) {
+    console.error('Price migration failed:', (e as Error).message);
+  }
+}
 
 @Catch()
 class AllExceptionsFilter implements ExceptionFilter {
@@ -49,6 +124,9 @@ async function bootstrap() {
   );
 
   app.useGlobalFilters(new AllExceptionsFilter());
+
+  // One-time price migration on startup (idempotent — runs only if legacy prices found)
+  await migratePrices(app);
 
   // Swagger
   const config = new DocumentBuilder()
