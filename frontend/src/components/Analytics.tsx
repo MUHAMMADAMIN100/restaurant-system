@@ -54,7 +54,7 @@ export default function Analytics() {
   }
 
   return (
-    <div className="anim-fade-up" style={{ display: 'grid', gap: 16 }}>
+    <div className="anim-fade-up analytics-root" style={{ display: 'grid', gap: 16, minWidth: 0, maxWidth: '100%' }}>
       {/* Period switcher */}
       <div className="flex-col-sm-row" style={{ justifyContent: 'space-between', gap: 12 }}>
         <div style={{ display: 'flex', gap: 6, background: '#0f0f0f', padding: 4, borderRadius: 10, border: '1px solid #1c1c1c', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
@@ -139,9 +139,9 @@ const KPIGrid = memo(function KPIGrid({ data }: { data: AnalyticsData }) {
   ];
 
   return (
-    <div className="stagger" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))', gap: 12 }}>
+    <div className="stagger" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))', gap: 12, minWidth: 0, maxWidth: '100%' }}>
       {items.map((m) => (
-        <div key={m.label} className="anim-fade-up card-hover" style={{ ...S.card, padding: 18, minWidth: 0 }}>
+        <div key={m.label} className="anim-fade-up card-hover" style={{ ...S.card, padding: 18, minWidth: 0, maxWidth: '100%', overflow: 'hidden' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
             <div style={{ fontSize: 11, color: '#4b5563', textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 600 }}>{m.label}</div>
             {m.trend !== null && m.trend !== undefined && (
@@ -170,7 +170,7 @@ const RevenueChart = memo(function RevenueChart({ days }: { days: DayBucket[] })
   const total = days.reduce((s, d) => s + d.revenue, 0);
 
   return (
-    <div className="anim-fade-up" style={{ ...S.card }}>
+    <div className="anim-fade-up" data-chart-card style={{ ...S.card, minWidth: 0, maxWidth: '100%', overflow: 'hidden' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 18, flexWrap: 'wrap', gap: 8 }}>
         <h3 style={{ margin: 0, fontFamily: "'Playfair Display', serif", color: '#e5e7eb', fontSize: 17 }}>Выручка по дням</h3>
         <span style={{ fontSize: 12, color: '#4b5563' }}>Всего: <strong style={{ color: '#f59e0b' }}>{fmt(total)}</strong></span>
@@ -235,7 +235,7 @@ const LiveKitchenLoad = memo(function LiveKitchenLoad({ load }: { load: LiveLoad
   const status = totalActive === 0 ? '😌 Спокойно' : totalActive < 5 ? '🟢 Норма' : totalActive < 10 ? '🟡 Загружено' : '🔴 Перегрузка';
 
   return (
-    <div className="anim-fade-up" style={{ ...S.card }}>
+    <div className="anim-fade-up" data-chart-card style={{ ...S.card, minWidth: 0, maxWidth: '100%', overflow: 'hidden' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 18, flexWrap: 'wrap', gap: 8 }}>
         <h3 style={{ margin: 0, fontFamily: "'Playfair Display', serif", color: '#e5e7eb', fontSize: 17 }}>Загрузка кухни</h3>
         <span className="anim-pulse" style={{ fontSize: 12, color: '#9ca3af' }}>{status}</span>
@@ -279,7 +279,7 @@ const PaymentSplit = memo(function PaymentSplit({ cashRevenue, cardRevenue, cash
   const cardPct = total ? (cardRevenue / total) * 100 : 0;
 
   return (
-    <div className="anim-fade-up" style={{ ...S.card }}>
+    <div className="anim-fade-up" data-chart-card style={{ ...S.card, minWidth: 0, maxWidth: '100%', overflow: 'hidden' }}>
       <h3 style={{ margin: '0 0 18px', fontFamily: "'Playfair Display', serif", color: '#e5e7eb', fontSize: 17 }}>Способы оплаты</h3>
 
       {total === 0 ? <EmptyState icon="💳" text="Нет оплат" /> : (
@@ -331,7 +331,7 @@ const HourActivity = memo(function HourActivity({ hours }: { hours: HourBucket[]
   const peak = hours.reduce((best, h) => h.count > best.count ? h : best, hours[0]);
 
   return (
-    <div className="anim-fade-up" style={{ ...S.card }}>
+    <div className="anim-fade-up" data-chart-card style={{ ...S.card, minWidth: 0, maxWidth: '100%', overflow: 'hidden' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 18, flexWrap: 'wrap', gap: 8 }}>
         <h3 style={{ margin: 0, fontFamily: "'Playfair Display', serif", color: '#e5e7eb', fontSize: 17 }}>Активность по часам</h3>
         {peak && peak.count > 0 && (
@@ -380,7 +380,7 @@ const TopDishesCard = memo(function TopDishesCard({ title, dishes, valueKey, for
   const max = Math.max(...dishes.map((d) => d[valueKey]), 1);
 
   return (
-    <div className="anim-fade-up" style={{ ...S.card }}>
+    <div className="anim-fade-up" data-chart-card style={{ ...S.card, minWidth: 0, maxWidth: '100%', overflow: 'hidden' }}>
       <h3 style={{ margin: '0 0 16px', fontFamily: "'Playfair Display', serif", color: '#e5e7eb', fontSize: 17 }}>{title}</h3>
       {dishes.length === 0 ? <EmptyState icon="🍽" text="Нет данных" /> : (
         <div className="stagger">
@@ -418,7 +418,7 @@ const TopDishesCard = memo(function TopDishesCard({ title, dishes, valueKey, for
 const TopTablesCard = memo(function TopTablesCard({ tables }: { tables: TableBucket[] }) {
   if (tables.length === 0) return null;
   return (
-    <div className="anim-fade-up" style={{ ...S.card }}>
+    <div className="anim-fade-up" data-chart-card style={{ ...S.card, minWidth: 0, maxWidth: '100%', overflow: 'hidden' }}>
       <h3 style={{ margin: '0 0 18px', fontFamily: "'Playfair Display', serif", color: '#e5e7eb', fontSize: 17 }}>Топ столов</h3>
       <div className="stagger" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 100px), 1fr))', gap: 10 }}>
         {tables.map((t, i) => (
