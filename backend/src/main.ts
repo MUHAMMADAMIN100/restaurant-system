@@ -6,6 +6,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { getDataSourceToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { MenuItem } from './menu/menu-item.entity';
+import { Payment } from './payments/payment.entity';
 
 // One-time auto-migration: convert legacy UZS prices (>500) to realistic TJS values.
 // Idempotent: only runs if any item has price > 500.
@@ -79,6 +80,29 @@ async function migratePrices(app: any) {
   }
 }
 
+// Normalize legacy UZS payment amounts (>500) → divide by 1000 for rough TJS conversion.
+// Idempotent: only runs if any payment.amount > 500.
+async function migratePayments(app: any) {
+  try {
+    const ds: DataSource = app.get(getDataSourceToken());
+    const repo = ds.getRepository(Payment);
+    const all: Payment[] = await repo.find();
+    const legacy = all.filter((p: Payment) => Number(p.amount) > 500);
+    if (legacy.length === 0) {
+      console.log('💵 Payment migration: no legacy amounts detected, skipping.');
+      return;
+    }
+    console.log(`💵 Payment migration: normalizing ${legacy.length} legacy amounts...`);
+    for (const p of legacy) {
+      const newAmount = Math.max(Math.round(Number(p.amount) / 1000), 1);
+      await repo.update(p.id, { amount: newAmount });
+    }
+    console.log(`💵 Payment migration done: ${legacy.length} amounts normalized.`);
+  } catch (e) {
+    console.error('Payment migration failed:', (e as Error).message);
+  }
+}
+
 @Catch()
 class AllExceptionsFilter implements ExceptionFilter {
   catch(exception: unknown, host: ArgumentsHost) {
@@ -125,8 +149,9 @@ async function bootstrap() {
 
   app.useGlobalFilters(new AllExceptionsFilter());
 
-  // One-time price migration on startup (idempotent — runs only if legacy prices found)
+  // One-time data migration on startup (idempotent — runs only if legacy values found)
   await migratePrices(app);
+  await migratePayments(app);
 
   // Swagger
   const config = new DocumentBuilder()

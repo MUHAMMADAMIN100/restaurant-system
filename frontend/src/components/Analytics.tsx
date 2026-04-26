@@ -84,19 +84,19 @@ export default function Analytics() {
       <KPIGrid data={data} />
 
       {/* Revenue over time + Live kitchen load */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(400px, 100%), 1fr))', gap: 14 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 360px), 1fr))', gap: 14 }}>
         <RevenueChart days={data.revenueByDay} />
         <LiveKitchenLoad load={data.liveLoad} />
       </div>
 
       {/* Payment split + Hour activity */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(400px, 100%), 1fr))', gap: 14 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 360px), 1fr))', gap: 14 }}>
         <PaymentSplit cashRevenue={data.cashRevenue} cardRevenue={data.cardRevenue} cashCount={data.cashCount} cardCount={data.cardCount} />
         <HourActivity hours={data.ordersByHour} />
       </div>
 
       {/* Top dishes by revenue + by quantity */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(400px, 100%), 1fr))', gap: 14 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 360px), 1fr))', gap: 14 }}>
         <TopDishesCard title="Топ блюд по выручке" dishes={data.topDishesByRevenue} valueKey="revenue" formatValue={fmt} />
         <TopDishesCard title="Топ блюд по количеству" dishes={data.topDishesByQuantity} valueKey="quantity" formatValue={(v) => `${v} шт`} />
       </div>
@@ -139,9 +139,9 @@ const KPIGrid = memo(function KPIGrid({ data }: { data: AnalyticsData }) {
   ];
 
   return (
-    <div className="stagger" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
+    <div className="stagger" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))', gap: 12 }}>
       {items.map((m) => (
-        <div key={m.label} className="anim-fade-up card-hover" style={{ ...S.card, padding: 20 }}>
+        <div key={m.label} className="anim-fade-up card-hover" style={{ ...S.card, padding: 18, minWidth: 0 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
             <div style={{ fontSize: 11, color: '#4b5563', textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 600 }}>{m.label}</div>
             {m.trend !== null && m.trend !== undefined && (
@@ -179,35 +179,39 @@ const RevenueChart = memo(function RevenueChart({ days }: { days: DayBucket[] })
       {total === 0 ? <EmptyState icon="📈" text="Нет продаж в этом периоде" /> : (
         <div style={{ overflowX: 'auto', overflowY: 'hidden', WebkitOverflowScrolling: 'touch', margin: '0 -6px', padding: '0 6px' }}>
           <div style={{
-            display: 'flex', alignItems: 'flex-end', justifyContent: days.length <= 14 ? 'space-between' : 'flex-start',
-            gap: 4, height: 180, paddingTop: 8,
+            display: 'flex', alignItems: 'flex-end',
+            justifyContent: days.length === 1 ? 'center' : days.length <= 14 ? 'space-between' : 'flex-start',
+            gap: 6, height: 180, paddingTop: 8,
             minWidth: days.length > 14 ? `${days.length * 24}px` : '100%',
+            width: days.length === 1 ? '100%' : undefined,
           }}>
             {days.map((d, i) => {
               const h = max > 0 ? (d.revenue / max) * 100 : 0;
               const date = new Date(d.date);
               const label = date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
-              // Skip some labels when there are many days
               const labelStep = days.length > 21 ? 5 : days.length > 14 ? 3 : 1;
               const showLabel = i === days.length - 1 || i === 0 || i % labelStep === 0;
               return (
                 <div key={d.date} style={{
-                  flex: days.length <= 14 ? 1 : '0 0 auto',
+                  flex: days.length === 1 ? '0 0 80px' : days.length <= 14 ? 1 : '0 0 auto',
                   width: days.length > 14 ? 22 : undefined,
-                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, minWidth: 0,
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, minWidth: days.length === 1 ? 80 : 18,
+                  height: '100%',
                 }}>
-                  <div style={{ fontSize: 9, color: d.revenue > 0 ? '#f59e0b' : '#2a2a2a', fontWeight: 600, opacity: d.revenue > 0 ? 1 : 0.4, whiteSpace: 'nowrap' }}>
+                  <div style={{ fontSize: 9, color: d.revenue > 0 ? '#f59e0b' : '#2a2a2a', fontWeight: 600, opacity: d.revenue > 0 ? 1 : 0.4, whiteSpace: 'nowrap', flexShrink: 0 }}>
                     {d.revenue > 0 ? formatShort(d.revenue) : '·'}
                   </div>
-                  <div title={`${label}: ${fmt(d.revenue)} (${d.orders} зак.)`} style={{
-                    width: '100%', maxWidth: 36,
-                    height: `${Math.max(h, 2)}%`,
-                    background: d.revenue > 0 ? 'linear-gradient(180deg, #f59e0b, #b45309)' : '#1a1a1a',
-                    borderRadius: '4px 4px 0 0',
-                    transition: 'height 0.6s var(--ease-out)',
-                    minHeight: 2,
-                  }} />
-                  <div style={{ fontSize: 9, color: '#4b5563', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', width: '100%', textAlign: 'center', minHeight: 12 }}>
+                  <div style={{ flex: 1, width: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center', minHeight: 0 }}>
+                    <div title={`${label}: ${fmt(d.revenue)} (${d.orders} зак.)`} style={{
+                      width: days.length === 1 ? 60 : '80%', maxWidth: 60,
+                      height: `${Math.max(h, 2)}%`,
+                      background: d.revenue > 0 ? 'linear-gradient(180deg, #f59e0b, #b45309)' : '#1a1a1a',
+                      borderRadius: '4px 4px 0 0',
+                      transition: 'height 0.6s var(--ease-out)',
+                      minHeight: d.revenue > 0 ? 6 : 2,
+                    }} />
+                  </div>
+                  <div style={{ fontSize: 9, color: '#4b5563', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', width: '100%', textAlign: 'center', minHeight: 12, flexShrink: 0 }}>
                     {showLabel ? label : ''}
                   </div>
                 </div>
@@ -283,7 +287,7 @@ const PaymentSplit = memo(function PaymentSplit({ cashRevenue, cardRevenue, cash
           {/* Donut chart with conic-gradient */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap', justifyContent: 'center' }}>
             <div style={{
-              width: 130, height: 130, borderRadius: '50%',
+              width: 130, height: 130, borderRadius: '50%', flexShrink: 0,
               background: `conic-gradient(#10b981 0% ${cashPct}%, #3b82f6 ${cashPct}% 100%)`,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               position: 'relative',
@@ -295,7 +299,7 @@ const PaymentSplit = memo(function PaymentSplit({ cashRevenue, cardRevenue, cash
               </div>
             </div>
 
-            <div style={{ flex: 1, minWidth: 160, display: 'grid', gap: 10 }}>
+            <div style={{ flex: '1 1 160px', minWidth: 160, display: 'grid', gap: 10 }}>
               <PaymentRow color="#10b981" label="💵 Наличные" amount={cashRevenue} pct={cashPct} count={cashCount} />
               <PaymentRow color="#3b82f6" label="💳 Карта"    amount={cardRevenue} pct={cardPct} count={cardCount} />
             </div>
@@ -416,7 +420,7 @@ const TopTablesCard = memo(function TopTablesCard({ tables }: { tables: TableBuc
   return (
     <div className="anim-fade-up" style={{ ...S.card }}>
       <h3 style={{ margin: '0 0 18px', fontFamily: "'Playfair Display', serif", color: '#e5e7eb', fontSize: 17 }}>Топ столов</h3>
-      <div className="stagger" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))', gap: 10 }}>
+      <div className="stagger" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 100px), 1fr))', gap: 10 }}>
         {tables.map((t, i) => (
           <div key={t.table} className="anim-fade-up card-hover" style={{
             background: '#1a1a1a', border: '1px solid #262626',
