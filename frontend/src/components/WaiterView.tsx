@@ -151,7 +151,22 @@ export default function WaiterView() {
 
   // Real-time updates via WebSocket
   useOrderSocket({
-    onNew:    (o) => setOrders((p) => [o, ...p.filter((x) => x.id !== o.id)]),
+    onNew: (o) => setOrders((p) => {
+      // If we already have this order (by id), skip
+      if (p.find((x) => x.id === o.id)) return p;
+      // If we have an optimistic clone (negative id, same table, created within 15s), replace it
+      const optimisticIdx = p.findIndex((x) =>
+        x.id < 0 &&
+        x.tableNumber === o.tableNumber &&
+        Math.abs(new Date(x.createdAt).getTime() - new Date(o.createdAt).getTime()) < 15000
+      );
+      if (optimisticIdx !== -1) {
+        const next = [...p];
+        next[optimisticIdx] = o;
+        return next;
+      }
+      return [o, ...p];
+    }),
     onStatus: (o) => setOrders((p) => p.map((x) => x.id === o.id ? o : x)),
     onClosed: (o) => setOrders((p) => p.map((x) => x.id === o.id ? o : x)),
   });
@@ -217,7 +232,12 @@ export default function WaiterView() {
         tableNumber: optimisticOrder.tableNumber,
         items: cartItems.map(({ item, qty }) => ({ menuItemId: item.id, quantity: qty })),
       });
-      setOrders((p) => p.map((x) => x.id === tempId ? real : x));
+      // Replace optimistic by id; if WS already replaced it, ensure no duplicate
+      setOrders((p) => {
+        const hasReal = p.some((x) => x.id === real.id);
+        if (hasReal) return p.filter((x) => x.id !== tempId);
+        return p.map((x) => x.id === tempId ? real : x);
+      });
     } catch (e) {
       setOrders((p) => p.filter((x) => x.id !== tempId));
       show((e as Error).message, 'error');

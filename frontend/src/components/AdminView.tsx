@@ -23,7 +23,7 @@ function Analytics() {
   usePaymentSocket({ onCreated: () => reload() });
   useOrderSocket({
     onClosed: () => reload(),
-    onNew:    (o) => setOrders((p) => [o, ...p.filter((x) => x.id !== o.id)]),
+    onNew:    (o) => setOrders((p) => p.find((x) => x.id === o.id) ? p : [o, ...p]),
     onStatus: (o) => setOrders((p) => p.map((x) => x.id === o.id ? o : x)),
   });
 

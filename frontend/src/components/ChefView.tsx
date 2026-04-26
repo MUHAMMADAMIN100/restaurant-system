@@ -92,7 +92,10 @@ export default function ChefView() {
   useEffect(() => { loadOrders(); }, [loadOrders]);
 
   useOrderSocket({
-    onNew:    (o) => { setOrders((p) => [o, ...p.filter((x) => x.id !== o.id)]); show('🔔 Новый заказ!'); },
+    onNew: (o) => {
+      setOrders((p) => p.find((x) => x.id === o.id) ? p : [o, ...p]);
+      show('🔔 Новый заказ!');
+    },
     onStatus: (o) => setOrders((p) => p.map((x) => x.id === o.id ? o : x)),
     onClosed: (o) => setOrders((p) => p.map((x) => x.id === o.id ? o : x)),
   });
