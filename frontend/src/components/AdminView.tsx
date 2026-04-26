@@ -1,114 +1,11 @@
 import { useState, useEffect, useCallback, memo } from 'react';
 import { api } from '../api/client';
-import type { Analytics, Category, MenuItem, Order, OrderStatus } from '../api/client';
+import type { Category, MenuItem } from '../api/client';
 import { Modal, Spinner, useToast, EmptyState, Skeleton } from './UI';
 import { S, fmt } from '../utils/styles';
-import { useMenuSocket, useCategorySocket, useOrderSocket, usePaymentSocket } from '../hooks/useSocket';
+import { useMenuSocket, useCategorySocket } from '../hooks/useSocket';
+import Analytics from './Analytics';
 
-// ── Analytics ────────────────────────────────────────────────────────────────
-function Analytics() {
-  const [data, setData]       = useState<Analytics | null>(null);
-  const [orders, setOrders]   = useState<Order[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const reload = useCallback(() => {
-    Promise.all([api.getAnalytics(), api.getOrders()])
-      .then(([analytics, allOrders]) => { setData(analytics); setOrders(allOrders); })
-      .finally(() => setLoading(false));
-  }, []);
-
-  useEffect(() => { reload(); }, [reload]);
-
-  // Real-time: refresh on payment / status change
-  usePaymentSocket({ onCreated: () => reload() });
-  useOrderSocket({
-    onClosed: () => reload(),
-    onNew:    (o) => setOrders((p) => p.find((x) => x.id === o.id) ? p : [o, ...p]),
-    onStatus: (o) => setOrders((p) => p.map((x) => x.id === o.id ? o : x)),
-  });
-
-  if (loading) {
-    return (
-      <div className="anim-fade" style={{ display: 'grid', gap: 16 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
-          {[0, 1, 2].map((i) => <Skeleton key={i} height={108} radius={14} />)}
-        </div>
-        <Skeleton height={280} radius={14} />
-      </div>
-    );
-  }
-
-  const dishCount: Record<string, number> = {};
-  orders.forEach((o) => (o.items || []).forEach((it) => {
-    const name = it.menuItem?.name || '—';
-    dishCount[name] = (dishCount[name] || 0) + it.quantity;
-  }));
-  const popular = Object.entries(dishCount).sort((a, b) => b[1] - a[1]).slice(0, 6);
-
-  const statusCount: Record<OrderStatus, number> = { PENDING: 0, COOKING: 0, READY: 0, CLOSED: 0 };
-  orders.forEach((o) => { statusCount[o.status] = (statusCount[o.status] || 0) + 1; });
-  const statusColors = { PENDING: '#f59e0b', COOKING: '#3b82f6', READY: '#10b981', CLOSED: '#6b7280' };
-  const statusLabels = { PENDING: 'Ожидание', COOKING: 'Готовится', READY: 'Готово', CLOSED: 'Закрыты' };
-
-  const metrics = [
-    { label: 'Общая выручка',     value: fmt(data?.totalRevenue || 0), color: '#f59e0b' },
-    { label: 'Оплаченных заказов', value: String(data?.orderCount || 0), color: '#10b981' },
-    { label: 'Средний чек',        value: fmt(data?.avgOrder || 0),     color: '#3b82f6' },
-  ];
-
-  return (
-    <div className="anim-fade-up">
-      <div className="stagger" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16, marginBottom: 20 }}>
-        {metrics.map((m) => (
-          <div key={m.label} className="anim-fade-up card-hover" style={{ ...S.card, padding: 22 }}>
-            <div style={{ fontSize: 11, color: '#4b5563', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 600 }}>{m.label}</div>
-            <div style={{ fontSize: 30, fontWeight: 700, color: m.color, fontFamily: "'Playfair Display', serif", lineHeight: 1.1 }}>{m.value}</div>
-          </div>
-        ))}
-      </div>
-
-      <div className="grid-cols-12" style={{ gap: 16 }}>
-        <div className="anim-fade-up" style={{ ...S.card, animationDelay: '0.18s' }}>
-          <h3 style={{ margin: '0 0 22px', fontFamily: "'Playfair Display', serif", color: '#e5e7eb', fontSize: 18 }}>Популярные блюда</h3>
-          {popular.length === 0 && <EmptyState icon="📊" text="Нет данных" />}
-          <div className="stagger">
-            {popular.map(([name, count], i) => (
-              <div key={name} className="anim-fade-up" style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
-                <span style={{ width: 28, height: 28, background: i === 0 ? '#451a03' : '#1a1a1a', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, color: i === 0 ? '#f59e0b' : '#4b5563', fontWeight: 700, flexShrink: 0 }}>{i + 1}</span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, color: '#d1d5db', marginBottom: 6, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</div>
-                  <div style={{ height: 4, background: '#1e1e1e', borderRadius: 2, overflow: 'hidden' }}>
-                    <div style={{ height: '100%', width: `${((count as number) / ((popular[0]?.[1] as number) || 1)) * 100}%`, background: i === 0 ? 'linear-gradient(90deg, #f59e0b, #fbbf24)' : '#374151', borderRadius: 2, transition: 'width 0.8s var(--ease-out)' }} />
-                  </div>
-                </div>
-                <span style={{ fontSize: 14, color: '#f59e0b', fontWeight: 700, minWidth: 36, textAlign: 'right' }}>{count as number}×</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="anim-fade-up" style={{ ...S.card, animationDelay: '0.25s' }}>
-          <h3 style={{ margin: '0 0 22px', fontFamily: "'Playfair Display', serif", color: '#e5e7eb', fontSize: 18 }}>Заказы по статусам</h3>
-          {Object.entries(statusLabels).map(([s, l]) => (
-            <div key={s} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div style={{ width: 8, height: 8, borderRadius: '50%', background: statusColors[s as OrderStatus] }} />
-                <span style={{ fontSize: 13, color: '#9ca3af' }}>{l}</span>
-              </div>
-              <span style={{ fontSize: 24, fontWeight: 700, color: statusColors[s as OrderStatus], fontFamily: "'Playfair Display', serif", transition: 'all 0.3s var(--ease-spring)' }}>{statusCount[s as OrderStatus]}</span>
-            </div>
-          ))}
-          <div style={{ borderTop: '1px solid #1e1e1e', paddingTop: 14, marginTop: 4 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: 12, color: '#4b5563' }}>Всего заказов</span>
-              <span style={{ fontWeight: 700, color: '#e5e7eb' }}>{orders.length}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ── Categories tab ────────────────────────────────────────────────────────────
 interface CategoriesTabProps {

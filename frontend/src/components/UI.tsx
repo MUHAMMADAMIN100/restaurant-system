@@ -1,5 +1,4 @@
-import { useEffect, useState, memo, type ReactNode } from 'react';
-import { S } from '../utils/styles';
+import { useEffect, useState, memo, type ReactNode, type CSSProperties } from 'react';
 
 interface ModalProps {
   title: string;
@@ -25,27 +24,14 @@ export const Modal = memo(function Modal({ title, onClose, children, maxWidth = 
       aria-modal="true"
       aria-labelledby="modal-title"
       onClick={onClose}
-      className="anim-fade"
-      style={{
-        position: 'fixed', inset: 0,
-        background: 'rgba(0,0,0,0.85)',
-        backdropFilter: 'blur(4px)',
-        WebkitBackdropFilter: 'blur(4px)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        zIndex: 1000, padding: 16,
-      }}
+      className="modal-backdrop anim-fade"
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="anim-scale"
-        style={{
-          ...S.card,
-          width: '100%', maxWidth, maxHeight: '90vh', overflowY: 'auto',
-          border: '1px solid #2e2e2e',
-          boxShadow: '0 32px 90px rgba(0,0,0,0.7)',
-        }}
+        className="modal-card anim-scale"
+        style={{ ['--modal-max-width' as string]: `${maxWidth}px` } as CSSProperties}
       >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 22, gap: 12 }}>
+        <div className="modal-header">
           <h2 id="modal-title" style={{ margin: 0, fontSize: 20, fontFamily: "'Playfair Display', serif", color: '#f59e0b', flex: 1 }}>{title}</h2>
           <button
             onClick={onClose}
@@ -59,7 +45,9 @@ export const Modal = memo(function Modal({ title, onClose, children, maxWidth = 
             }}
           >×</button>
         </div>
-        {children}
+        <div className="modal-body">
+          {children}
+        </div>
       </div>
     </div>
   );

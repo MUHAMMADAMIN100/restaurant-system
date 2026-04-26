@@ -47,10 +47,32 @@ export interface Payment {
   createdAt: string;
 }
 
+export type AnalyticsPeriod = 'today' | 'week' | 'month' | 'all';
+
+export interface DayBucket  { date: string; revenue: number; orders: number; }
+export interface HourBucket { hour: number;  count: number;   revenue: number; }
+export interface TableBucket { table: number; revenue: number; orders: number; }
+export interface DishBucket { name: string; quantity: number; revenue: number; }
+export interface LiveLoad   { pending: number; cooking: number; ready: number; closed: number; }
+
 export interface Analytics {
+  period: AnalyticsPeriod;
   totalRevenue: number;
   orderCount: number;
   avgOrder: number;
+  cashRevenue: number;
+  cardRevenue: number;
+  cashCount: number;
+  cardCount: number;
+  tablesServed: number;
+  avgItemsPerOrder: number;
+  revenueByDay: DayBucket[];
+  ordersByHour: HourBucket[];
+  topTables: TableBucket[];
+  topDishesByRevenue: DishBucket[];
+  topDishesByQuantity: DishBucket[];
+  liveLoad: LiveLoad;
+  comparison: { revenueChange: number; orderChange: number } | null;
   payments: Payment[];
 }
 
@@ -101,7 +123,7 @@ export const api = {
     request<Order>('PATCH', `/orders/${id}/status`, { status }),
 
   getPayments:   ()                            => request<Payment[]>('GET', '/payments'),
-  getAnalytics:  ()                            => request<Analytics>('GET', '/payments/analytics'),
+  getAnalytics:  (period: AnalyticsPeriod = 'all') => request<Analytics>('GET', `/payments/analytics?period=${period}`),
   createPayment: (data: { orderId: number; amount: number; type: 'CASH' | 'CARD' }) =>
     request<Payment>('POST', '/payments', data),
 };
