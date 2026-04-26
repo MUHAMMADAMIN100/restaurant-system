@@ -42,15 +42,21 @@ export class OrdersGateway implements OnGatewayConnection, OnGatewayDisconnect {
     console.log(`WS disconnected: ${client.id}`);
   }
 
-  emitNewOrder(order: any) {
-    this.server.emit('order:new', order);
-  }
+  // ── Orders ────────────────────────────────────────────────────────────────
+  emitNewOrder(order: any)     { this.server.emit('order:new', order); }
+  emitStatusChange(order: any) { this.server.emit('order:status', order); }
+  emitOrderClosed(order: any)  { this.server.emit('order:closed', order); }
 
-  emitStatusChange(order: any) {
-    this.server.emit('order:status', order);
-  }
+  // ── Menu items ────────────────────────────────────────────────────────────
+  emitMenuCreated(item: any)   { this.server.emit('menu:created', item); }
+  emitMenuUpdated(item: any)   { this.server.emit('menu:updated', item); }
+  emitMenuDeleted(id: number)  { this.server.emit('menu:deleted', { id }); }
 
-  emitOrderClosed(order: any) {
-    this.server.emit('order:closed', order);
-  }
+  // ── Categories ────────────────────────────────────────────────────────────
+  emitCategoryCreated(cat: any)  { this.server.emit('category:created', cat); }
+  emitCategoryUpdated(cat: any)  { this.server.emit('category:updated', cat); }
+  emitCategoryDeleted(id: number){ this.server.emit('category:deleted', { id }); }
+
+  // ── Payments ──────────────────────────────────────────────────────────────
+  emitPaymentCreated(p: any)   { this.server.emit('payment:created', p); }
 }

@@ -1,4 +1,4 @@
-import { Module, Injectable, Controller, Get, Post, Patch, Delete, Body, Param, ParseIntPipe, UseGuards, NotFoundException } from '@nestjs/common';
+import { Module, Injectable, Controller, Get, Post, Patch, Delete, Body, Param, ParseIntPipe, UseGuards, NotFoundException, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -6,6 +6,8 @@ import { IsString, MinLength } from 'class-validator';
 import { JwtAuthGuard, RolesGuard, Roles } from '../auth/auth.module';
 import { UserRole } from '../users/user.entity';
 import { Category } from './category.entity';
+import { OrdersModule } from '../orders/orders.module';
+import { OrdersGateway } from '../gateway/orders.gateway';
 
 export { Category };
 
@@ -25,7 +27,10 @@ export class UpdateCategoryDto {
 // ── Service ──────────────────────────────────────────────────────────────────
 @Injectable()
 export class CategoriesService {
-  constructor(@InjectRepository(Category) private repo: Repository<Category>) {}
+  constructor(
+    @InjectRepository(Category) private repo: Repository<Category>,
+    private gateway: OrdersGateway,
+  ) {}
 
   findAll() { return this.repo.find(); }
 
@@ -35,17 +40,24 @@ export class CategoriesService {
     return cat;
   }
 
-  create(dto: CreateCategoryDto) { return this.repo.save(this.repo.create(dto)); }
+  async create(dto: CreateCategoryDto) {
+    const saved = await this.repo.save(this.repo.create(dto));
+    this.gateway.emitCategoryCreated(saved);
+    return saved;
+  }
 
   async update(id: number, dto: UpdateCategoryDto) {
     await this.findOne(id);
     await this.repo.update(id, dto);
-    return this.findOne(id);
+    const updated = await this.findOne(id);
+    this.gateway.emitCategoryUpdated(updated);
+    return updated;
   }
 
   async remove(id: number) {
     await this.findOne(id);
     await this.repo.delete(id);
+    this.gateway.emitCategoryDeleted(id);
     return { message: 'Удалено' };
   }
 }
@@ -74,7 +86,10 @@ export class CategoriesController {
 
 // ── Module ───────────────────────────────────────────────────────────────────
 @Module({
-  imports: [TypeOrmModule.forFeature([Category])],
+  imports: [
+    TypeOrmModule.forFeature([Category]),
+    forwardRef(() => OrdersModule),
+  ],
   providers: [CategoriesService],
   controllers: [CategoriesController],
   exports: [CategoriesService, TypeOrmModule],

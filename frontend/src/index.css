@@ -8,6 +8,7 @@
   --color-text-muted: #6b7280;
   --color-text-dim:   #4b5563;
   --color-accent:     #f59e0b;
+  --color-accent-2:   #fbbf24;
   --color-success:    #10b981;
   --color-danger:     #ef4444;
   --color-danger-bg:  #7f1d1d;
@@ -15,4 +16,312 @@
   --radius-sm:        8px;
   --radius-md:        12px;
   --radius-lg:        14px;
+  --radius-xl:        18px;
+
+  /* Easing curves */
+  --ease-out:    cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  overflow-x: hidden;
+}
+
+/* ───────────────────────────────────────────────── KEYFRAMES ─────── */
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeInDown {
+  from { opacity: 0; transform: translateY(-14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.92); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(40px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes slideInLeft {
+  from { opacity: 0; transform: translateX(-40px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes pop {
+  0%   { transform: scale(0.8); opacity: 0; }
+  60%  { transform: scale(1.06); opacity: 1; }
+  100% { transform: scale(1); }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.4; }
+}
+
+@keyframes pulseGlow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.5); }
+  50%      { box-shadow: 0 0 0 12px rgba(245, 158, 11, 0); }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -1000px 0; }
+  100% { background-position: 1000px 0; }
+}
+
+@keyframes ripple {
+  0%   { transform: scale(0); opacity: 0.6; }
+  100% { transform: scale(2.5); opacity: 0; }
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25%      { transform: translateX(-6px); }
+  75%      { transform: translateX(6px); }
+}
+
+@keyframes flash {
+  0%   { background: rgba(245, 158, 11, 0.4); }
+  100% { background: transparent; }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-6px); }
+}
+
+/* ───────────────────────────────────────────────── ANIMATION CLASSES ─────── */
+
+.anim-fade        { animation: fadeIn        0.3s var(--ease-out) both; }
+.anim-fade-up     { animation: fadeInUp      0.4s var(--ease-out) both; }
+.anim-fade-down   { animation: fadeInDown    0.4s var(--ease-out) both; }
+.anim-scale       { animation: scaleIn       0.35s var(--ease-spring) both; }
+.anim-slide-right { animation: slideInRight  0.4s var(--ease-out) both; }
+.anim-slide-left  { animation: slideInLeft   0.4s var(--ease-out) both; }
+.anim-pop         { animation: pop           0.45s var(--ease-spring) both; }
+.anim-pulse       { animation: pulse         2s ease-in-out infinite; }
+.anim-pulse-glow  { animation: pulseGlow     2s ease-in-out infinite; }
+.anim-flash       { animation: flash         1.2s ease-out both; }
+.anim-float       { animation: float         3s ease-in-out infinite; }
+.anim-shake       { animation: shake         0.4s ease-in-out; }
+
+/* Stagger children */
+.stagger > *:nth-child(1)  { animation-delay: 0.02s; }
+.stagger > *:nth-child(2)  { animation-delay: 0.05s; }
+.stagger > *:nth-child(3)  { animation-delay: 0.08s; }
+.stagger > *:nth-child(4)  { animation-delay: 0.11s; }
+.stagger > *:nth-child(5)  { animation-delay: 0.14s; }
+.stagger > *:nth-child(6)  { animation-delay: 0.17s; }
+.stagger > *:nth-child(7)  { animation-delay: 0.20s; }
+.stagger > *:nth-child(8)  { animation-delay: 0.23s; }
+.stagger > *:nth-child(9)  { animation-delay: 0.26s; }
+.stagger > *:nth-child(10) { animation-delay: 0.29s; }
+.stagger > *:nth-child(n+11){ animation-delay: 0.32s; }
+
+/* ───────────────────────────────────────────────── INTERACTIONS ─────── */
+
+button {
+  cursor: pointer;
+  transition: transform 0.15s var(--ease-out), opacity 0.15s, background 0.15s, border-color 0.15s, box-shadow 0.15s;
+  font-family: inherit;
+}
+
+button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: brightness(1.08);
+}
+
+button:active:not(:disabled) {
+  transform: translateY(0) scale(0.97);
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+input, select, textarea {
+  transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+  font-family: inherit;
+}
+
+input:focus, select:focus, textarea:focus {
+  border-color: var(--color-accent) !important;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.18);
+  outline: none;
+}
+
+a { color: var(--color-accent); transition: opacity 0.15s; }
+a:hover { opacity: 0.8; }
+
+/* Card hover lift */
+.card-hover {
+  transition: transform 0.25s var(--ease-out), border-color 0.25s, box-shadow 0.25s;
+}
+
+.card-hover:hover {
+  transform: translateY(-3px);
+  border-color: var(--color-border-2);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
+}
+
+/* Image zoom */
+.img-zoom { overflow: hidden; }
+.img-zoom img {
+  transition: transform 0.5s var(--ease-out);
+}
+.img-zoom:hover img { transform: scale(1.07); }
+
+/* Custom scrollbar */
+::-webkit-scrollbar          { width: 10px; height: 10px; }
+::-webkit-scrollbar-track    { background: var(--color-surface); }
+::-webkit-scrollbar-thumb    { background: var(--color-border-2); border-radius: 5px; }
+::-webkit-scrollbar-thumb:hover { background: #3a3a3a; }
+
+/* ───────────────────────────────────────────────── RESPONSIVE GRIDS ─────── */
+
+.grid-cols-1234 {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 480px)  { .grid-cols-1234 { grid-template-columns: repeat(2, 1fr); } }
+@media (min-width: 768px)  { .grid-cols-1234 { grid-template-columns: repeat(3, 1fr); gap: 16px; } }
+@media (min-width: 1280px) { .grid-cols-1234 { grid-template-columns: repeat(4, 1fr); gap: 18px; } }
+
+.grid-cols-123 {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 640px)  { .grid-cols-123 { grid-template-columns: repeat(2, 1fr); } }
+@media (min-width: 1024px) { .grid-cols-123 { grid-template-columns: repeat(3, 1fr); gap: 18px; } }
+
+.grid-cols-12 {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 768px) { .grid-cols-12 { grid-template-columns: repeat(2, 1fr); gap: 16px; } }
+
+/* Container with responsive padding */
+.container-app {
+  width: 100%;
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+@media (min-width: 640px)  { .container-app { padding: 20px; } }
+@media (min-width: 1024px) { .container-app { padding: 28px 24px; } }
+
+/* Hide on mobile */
+.hide-mobile  { display: none; }
+@media (min-width: 768px) { .hide-mobile { display: initial; } }
+
+/* Show only on mobile */
+.show-mobile  { display: initial; }
+@media (min-width: 768px) { .show-mobile { display: none; } }
+
+/* Flex helpers */
+.flex-col-sm-row { display: flex; flex-direction: column; gap: 12px; }
+@media (min-width: 768px) { .flex-col-sm-row { flex-direction: row; align-items: center; } }
+
+/* Two-column layout: cart on right on desktop, full width below on mobile */
+.menu-cart-layout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+@media (min-width: 1024px) {
+  .menu-cart-layout {
+    grid-template-columns: 1fr 360px;
+    gap: 20px;
+  }
+}
+
+/* Kanban: 1 col on mobile, 3 cols on desktop */
+.kanban-3 {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 768px)  { .kanban-3 { grid-template-columns: repeat(2, 1fr); } }
+@media (min-width: 1024px) { .kanban-3 { grid-template-columns: repeat(3, 1fr); gap: 20px; } }
+
+/* Table responsive: hide some columns on mobile */
+@media (max-width: 640px) {
+  .table-cell-md { display: none; }
+}
+
+/* ───────────────────────────────────────────────── UTILS ─────── */
+
+.skeleton {
+  background: linear-gradient(90deg, #1a1a1a 0%, #242424 50%, #1a1a1a 100%);
+  background-size: 1000px 100%;
+  animation: shimmer 1.4s linear infinite;
+  border-radius: var(--radius-md);
+}
+
+.shimmer-text {
+  background: linear-gradient(90deg, var(--color-accent), var(--color-accent-2), var(--color-accent));
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer 3s linear infinite;
+}
+
+.dot-online {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-success);
+  display: inline-block;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+/* Reduce motion preference */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

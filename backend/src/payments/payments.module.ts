@@ -12,6 +12,7 @@ import { UserRole } from '../users/user.entity';
 import { Payment, PaymentType } from './payment.entity';
 import { OrdersService } from '../orders/orders.module';
 import { OrderStatus } from '../orders/order.entity';
+import { OrdersGateway } from '../gateway/orders.gateway';
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 export class CreatePaymentDto {
@@ -26,6 +27,7 @@ export class PaymentsService {
   constructor(
     @InjectRepository(Payment) private repo: Repository<Payment>,
     private ordersService: OrdersService,
+    private gateway: OrdersGateway,
   ) {}
 
   findAll() {
@@ -45,6 +47,7 @@ export class PaymentsService {
 
     // Close the order
     await this.ordersService.updateStatus(dto.orderId, { status: OrderStatus.CLOSED });
+    this.gateway.emitPaymentCreated(payment);
 
     return payment;
   }

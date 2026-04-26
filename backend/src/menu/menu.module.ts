@@ -1,4 +1,4 @@
-import { Module, Injectable, Controller, Get, Post, Patch, Delete, Body, Param, ParseIntPipe, UseGuards, NotFoundException, Query } from '@nestjs/common';
+import { Module, Injectable, Controller, Get, Post, Patch, Delete, Body, Param, ParseIntPipe, UseGuards, NotFoundException, Query, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -7,6 +7,8 @@ import { Type } from 'class-transformer';
 import { JwtAuthGuard, RolesGuard, Roles } from '../auth/auth.module';
 import { UserRole } from '../users/user.entity';
 import { MenuItem } from './menu-item.entity';
+import { OrdersModule } from '../orders/orders.module';
+import { OrdersGateway } from '../gateway/orders.gateway';
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 export class CreateMenuItemDto {
@@ -30,7 +32,10 @@ export class UpdateMenuItemDto {
 // ── Service ──────────────────────────────────────────────────────────────────
 @Injectable()
 export class MenuService {
-  constructor(@InjectRepository(MenuItem) private repo: Repository<MenuItem>) {}
+  constructor(
+    @InjectRepository(MenuItem) private repo: Repository<MenuItem>,
+    private gateway: OrdersGateway,
+  ) {}
 
   findAll(available?: boolean) {
     const where = available !== undefined ? { isAvailable: available } : {};
@@ -43,19 +48,25 @@ export class MenuService {
     return item;
   }
 
-  create(dto: CreateMenuItemDto) {
-    return this.repo.save(this.repo.create({ ...dto, isAvailable: dto.isAvailable ?? true }));
+  async create(dto: CreateMenuItemDto) {
+    const saved = await this.repo.save(this.repo.create({ ...dto, isAvailable: dto.isAvailable ?? true }));
+    const full = await this.findOne(saved.id);
+    this.gateway.emitMenuCreated(full);
+    return full;
   }
 
   async update(id: number, dto: UpdateMenuItemDto) {
     await this.findOne(id);
     await this.repo.update(id, dto);
-    return this.findOne(id);
+    const updated = await this.findOne(id);
+    this.gateway.emitMenuUpdated(updated);
+    return updated;
   }
 
   async remove(id: number) {
     await this.findOne(id);
     await this.repo.delete(id);
+    this.gateway.emitMenuDeleted(id);
     return { message: 'Удалено' };
   }
 }
@@ -89,7 +100,10 @@ export class MenuController {
 
 // ── Module ───────────────────────────────────────────────────────────────────
 @Module({
-  imports: [TypeOrmModule.forFeature([MenuItem])],
+  imports: [
+    TypeOrmModule.forFeature([MenuItem]),
+    forwardRef(() => OrdersModule),
+  ],
   providers: [MenuService],
   controllers: [MenuController],
   exports: [MenuService],
