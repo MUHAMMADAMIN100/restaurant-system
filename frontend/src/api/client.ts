@@ -15,8 +15,8 @@ export interface MenuItem {
   id: number;
   name: string;
   price: number;
-  categoryId: number;
-  category?: Category;
+  categoryId: number | null;
+  category?: Category | null;
   isAvailable: boolean;
   description: string | null;
   imageUrl: string | null;
@@ -27,6 +27,8 @@ export interface OrderItem {
   menuItemId: number;
   menuItem?: MenuItem;
   quantity: number;
+  /** Price at the moment of ordering (null for legacy orders). */
+  price?: number | null;
 }
 
 export type OrderStatus = 'PENDING' | 'COOKING' | 'READY' | 'CLOSED';
@@ -72,30 +74,53 @@ export interface Analytics {
   topDishesByRevenue: DishBucket[];
   topDishesByQuantity: DishBucket[];
   liveLoad: LiveLoad;
-  comparison: { revenueChange: number; orderChange: number } | null;
+  comparison: { revenueChange: number | null; orderChange: number | null } | null;
   payments: Payment[];
 }
 
 const BASE = (import.meta.env.VITE_API_URL || '') + '/api';
+const TOKEN_KEY = 'resto_token';
 
-function getToken(): string | null {
-  return localStorage.getItem('resto_token');
+/** Fired when the server rejects the stored token; App listens and signs the user out. */
+export const SESSION_EXPIRED_EVENT = 'resto:session-expired';
+
+export class ApiError extends Error {
+  constructor(message: string, public status: number) {
+    super(message);
+  }
 }
+
+export const tokenStore = {
+  get: () => { try { return localStorage.getItem(TOKEN_KEY); } catch { return null; } },
+  set: (t: string) => { try { localStorage.setItem(TOKEN_KEY, t); } catch { /* storage unavailable */ } },
+  clear: () => { try { localStorage.removeItem(TOKEN_KEY); } catch { /* storage unavailable */ } },
+};
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  const token = getToken();
+  const token = tokenStore.get();
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
-  const res = await fetch(`${BASE}${path}`, {
-    method,
-    headers,
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}${path}`, {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch {
+    throw new ApiError('Нет связи с сервером. Проверьте интернет и попробуйте ещё раз.', 0);
+  }
 
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ message: 'Ошибка сервера' }));
-    throw new Error((err as { message?: string }).message || `HTTP ${res.status}`);
+    const err = await res.json().catch(() => ({})) as { message?: string | string[] };
+    if (res.status === 401 && path !== '/auth/login') {
+      tokenStore.clear();
+      window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+    }
+    const raw = Array.isArray(err.message) ? err.message[0] : err.message;
+    const fallback = res.status >= 500 ? 'Ошибка сервера. Попробуйте ещё раз.' : `Ошибка ${res.status}`;
+    throw new ApiError(raw || fallback, res.status);
   }
 
   return res.json() as Promise<T>;
@@ -124,6 +149,6 @@ export const api = {
 
   getPayments:   ()                            => request<Payment[]>('GET', '/payments'),
   getAnalytics:  (period: AnalyticsPeriod = 'all') => request<Analytics>('GET', `/payments/analytics?period=${period}`),
-  createPayment: (data: { orderId: number; amount: number; type: 'CASH' | 'CARD' }) =>
+  createPayment: (data: { orderId: number; type: 'CASH' | 'CARD' }) =>
     request<Payment>('POST', '/payments', data),
 };

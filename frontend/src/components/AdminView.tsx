@@ -1,363 +1,593 @@
-import { useState, useEffect, useCallback, memo } from 'react';
+import { useState, useEffect, useCallback, useMemo, type FormEvent } from 'react';
+import {
+  ChartBarIcon, ListBulletsIcon, TagIcon, SignOutIcon, PlusIcon, PencilSimpleIcon, TrashIcon,
+  MagnifyingGlassIcon, BowlFoodIcon, WarningCircleIcon, ArrowClockwiseIcon, FolderSimpleIcon,
+} from '@phosphor-icons/react';
 import { api } from '../api/client';
-import type { Category, MenuItem } from '../api/client';
-import { Modal, Spinner, useToast, EmptyState, Skeleton } from './UI';
-import { S, fmt } from '../utils/styles';
-import { useMenuSocket, useCategorySocket } from '../hooks/useSocket';
+import type { Category, MenuItem, User } from '../api/client';
+import { Modal, Spinner, useToast, EmptyState, Skeleton, ConfirmDialog, Brand, UserChip } from './UI';
+import { fmt, pluralRu, upsertById } from '../utils/format';
+import { useMenuSocket, useCategorySocket, useSocketStatus } from '../hooks/useSocket';
 import Analytics from './Analytics';
 
+type Section = 'analytics' | 'menu' | 'categories';
+const SECTIONS: { key: Section; label: string; icon: JSX.Element }[] = [
+  { key: 'analytics',  label: 'Аналитика', icon: <ChartBarIcon size={20} aria-hidden /> },
+  { key: 'menu',       label: 'Меню',      icon: <ListBulletsIcon size={20} aria-hidden /> },
+  { key: 'categories', label: 'Категории', icon: <TagIcon size={20} aria-hidden /> },
+];
+const sectionFromHash = (): Section => {
+  const h = window.location.hash.replace('#', '');
+  return (SECTIONS.some((s) => s.key === h) ? h : 'analytics') as Section;
+};
 
-// ── Categories tab ────────────────────────────────────────────────────────────
-interface CategoriesTabProps {
-  categories: Category[];
-  menu: MenuItem[];
-  onCreate: (name: string) => Promise<void>;
-  onUpdate: (id: number, name: string) => Promise<void>;
-  onDelete: (id: number) => Promise<void>;
+function Thumb({ src }: { src: string | null }) {
+  const [failed, setFailed] = useState(false);
+  return (
+    <span className="thumb" aria-hidden="true">
+      {src && !failed ? <img src={src} alt="" loading="lazy" width={56} height={42} onError={() => setFailed(true)} /> : <BowlFoodIcon size={20} />}
+    </span>
+  );
 }
 
-const CategoriesTab = memo(function CategoriesTab({ categories, menu, onCreate, onUpdate, onDelete }: CategoriesTabProps) {
-  const [modal, setModal] = useState<'new' | Category | null>(null);
-  const [name, setName]   = useState('');
-  const [saving, setSaving] = useState(false);
+// ── Dish form ────────────────────────────────────────────────────────────────
+interface DishPayload { name: string; description: string | null; imageUrl: string | null; price: number; categoryId: number; isAvailable: boolean; }
+interface DishFormProps { initial: MenuItem | null; categories: Category[]; onClose: () => void; onSave: (data: DishPayload) => Promise<void>; }
 
-  const openAdd  = () => { setName(''); setModal('new'); };
-  const openEdit = (c: Category) => { setName(c.name); setModal(c); };
+function DishForm({ initial, categories, onClose, onSave }: DishFormProps) {
+  const [name, setName]         = useState(initial?.name ?? '');
+  const [description, setDesc]  = useState(initial?.description ?? '');
+  const [imageUrl, setImageUrl] = useState(initial?.imageUrl ?? '');
+  const [price, setPrice]       = useState(initial ? String(Number(initial.price)) : '');
+  const [categoryId, setCat]    = useState<number | ''>(initial?.categoryId ?? categories[0]?.id ?? '');
+  const [isAvailable, setAvail] = useState(initial?.isAvailable ?? true);
+  const [submitted, setSubmitted] = useState(false);
+  const [saving, setSaving]     = useState(false);
+  const [serverError, setServerError] = useState('');
+  const [imgFailed, setImgFailed] = useState(false);
 
-  const save = async () => {
-    if (!name.trim() || !modal) return;
-    setSaving(true);
+  const priceNum = Number(price.replace(',', '.'));
+  const errors = {
+    name: !name.trim() ? 'Введите название блюда' : '',
+    price: !price ? 'Укажите цену' : !(priceNum > 0) ? 'Цена должна быть больше нуля' : !/^\d+([.,]\d{1,2})?$/.test(price.trim()) ? 'Не больше двух знаков после запятой' : '',
+    category: !categoryId ? 'Выберите категорию' : '',
+    imageUrl: imageUrl.trim() && !/^https?:\/\/\S+$/i.test(imageUrl.trim()) ? 'Ссылка должна начинаться с http:// или https://' : '',
+  };
+  const show = (k: keyof typeof errors) => (submitted ? errors[k] : '');
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setSubmitted(true);
+    if (Object.values(errors).some(Boolean)) {
+      const first = (['name', 'price', 'category', 'imageUrl'] as const).find((k) => errors[k]);
+      document.getElementById(`dish-${first}`)?.focus();
+      return;
+    }
+    setSaving(true); setServerError('');
     try {
-      if (modal === 'new') await onCreate(name);
-      else await onUpdate(modal.id, name);
-      setModal(null);
-    } finally { setSaving(false); }
+      await onSave({
+        name: name.trim(), description: description.trim() || null, imageUrl: imageUrl.trim() || null,
+        price: priceNum, categoryId: Number(categoryId), isAvailable,
+      });
+      onClose();
+    } catch (err) {
+      setServerError((err as Error).message);
+      setSaving(false);
+    }
   };
 
   return (
-    <div className="anim-fade-up" style={S.card}>
-      <div className="flex-col-sm-row" style={{ justifyContent: 'space-between', marginBottom: 22 }}>
-        <h2 style={{ margin: 0, fontFamily: "'Playfair Display', serif", color: '#e5e7eb', fontSize: 22 }}>Категории</h2>
-        <button style={S.btn()} onClick={openAdd}>+ Добавить</button>
-      </div>
-      <div className="stagger" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 12 }}>
-        {categories.map((c) => (
-          <div key={c.id} className="anim-fade-up card-hover" style={{ background: '#1a1a1a', border: '1px solid #262626', borderRadius: 12, padding: '16px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <div style={{ fontWeight: 600, color: '#e5e7eb', marginBottom: 5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</div>
-              <div style={{ fontSize: 12, color: '#4b5563' }}>{menu.filter((m) => m.categoryId === c.id).length} блюд</div>
-            </div>
-            <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-              <button style={{ ...S.btnGhost, padding: '6px 10px', fontSize: 14 }} onClick={() => openEdit(c)} aria-label="Изменить">✏</button>
-              <button style={{ ...S.btnDanger, padding: '6px 10px', fontSize: 14 }} onClick={() => onDelete(c.id)} aria-label="Удалить">✕</button>
-            </div>
-          </div>
-        ))}
-        {categories.length === 0 && <EmptyState icon="📁" text="Нет категорий" />}
-      </div>
+    <Modal
+      title={initial ? 'Изменить блюдо' : 'Новое блюдо'}
+      onClose={onClose}
+      width={560}
+      busy={saving}
+      footer={
+        <>
+          <button type="button" className="btn" onClick={onClose} disabled={saving}>Отмена</button>
+          <button type="submit" form="dish-form" className="btn btn--primary" disabled={saving}>
+            {saving && <Spinner />} {initial ? 'Сохранить' : 'Добавить блюдо'}
+          </button>
+        </>
+      }
+    >
+      <form id="dish-form" className="form-grid" onSubmit={submit} noValidate>
+        {serverError && <div className="alert" role="alert"><WarningCircleIcon size={18} aria-hidden />{serverError}</div>}
 
-      {modal && (
-        <Modal title={modal === 'new' ? 'Новая категория' : 'Изменить категорию'} onClose={() => setModal(null)} maxWidth={380}>
-          <label style={S.label}>Название</label>
-          <input style={S.input} value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && save()} placeholder="Горячие блюда" autoFocus />
-          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 22 }}>
-            <button style={S.btnGhost} onClick={() => setModal(null)}>Отмена</button>
-            <button style={{ ...S.btn(), display: 'flex', alignItems: 'center', gap: 8 }} onClick={save} disabled={saving}>
-              {saving && <Spinner size={14} color="#000" />} Сохранить
-            </button>
+        <div className="field">
+          <label className="label" htmlFor="dish-name">Название <span className="req" aria-hidden>*</span></label>
+          <input id="dish-name" className="input" value={name} onChange={(e) => setName(e.target.value)} maxLength={255}
+            aria-invalid={!!show('name')} aria-describedby={show('name') ? 'dish-name-err' : undefined} data-autofocus />
+          {show('name') && <span className="field-error" id="dish-name-err">{show('name')}</span>}
+        </div>
+
+        <div className="form-row">
+          <div className="field">
+            <label className="label" htmlFor="dish-price">Цена <span className="req" aria-hidden>*</span></label>
+            <div className="input-wrap">
+              <input id="dish-price" className="input num" inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="0"
+                aria-invalid={!!show('price')} aria-describedby={show('price') ? 'dish-price-err' : 'dish-price-hint'} />
+              <span className="input-wrap__suffix">сомони</span>
+            </div>
+            {show('price') ? <span className="field-error" id="dish-price-err">{show('price')}</span> : <span className="hint" id="dish-price-hint">Например, 55 или 12,50</span>}
           </div>
-        </Modal>
-      )}
-    </div>
+          <div className="field">
+            <label className="label" htmlFor="dish-category">Категория <span className="req" aria-hidden>*</span></label>
+            <select id="dish-category" className="select" value={categoryId} onChange={(e) => setCat(e.target.value ? Number(e.target.value) : '')}
+              aria-invalid={!!show('category')} aria-describedby={show('category') ? 'dish-category-err' : undefined}>
+              {categories.length === 0 && <option value="">Сначала создайте категорию</option>}
+              {!categoryId && categories.length > 0 && <option value="">Выберите категорию</option>}
+              {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            {show('category') && <span className="field-error" id="dish-category-err">{show('category')}</span>}
+          </div>
+        </div>
+
+        <div className="field">
+          <label className="label" htmlFor="dish-desc">Описание</label>
+          <textarea id="dish-desc" className="textarea" value={description} onChange={(e) => setDesc(e.target.value)} placeholder="Состав, вес, особенности подачи" />
+        </div>
+
+        <div className="field">
+          <label className="label" htmlFor="dish-imageUrl">Ссылка на фото</label>
+          <input id="dish-imageUrl" className="input" type="url" inputMode="url" value={imageUrl}
+            onChange={(e) => { setImageUrl(e.target.value); setImgFailed(false); }} placeholder="https://…"
+            aria-invalid={!!show('imageUrl')} aria-describedby={show('imageUrl') ? 'dish-img-err' : undefined} />
+          {show('imageUrl') && <span className="field-error" id="dish-img-err">{show('imageUrl')}</span>}
+          {imageUrl.trim() && !errors.imageUrl && (
+            <div className="img-preview">
+              {imgFailed
+                ? <div className="empty" style={{ padding: 'var(--sp-6)' }}><span className="empty__text">Не удалось загрузить изображение по ссылке</span></div>
+                : <img src={imageUrl.trim()} alt="Предпросмотр фото блюда" onError={() => setImgFailed(true)} />}
+            </div>
+          )}
+        </div>
+
+        <label className="switch">
+          <input type="checkbox" checked={isAvailable} onChange={(e) => setAvail(e.target.checked)} />
+          <span className="switch__track" aria-hidden />
+          <span className="switch__label">Доступно для заказа</span>
+        </label>
+      </form>
+    </Modal>
   );
-});
+}
 
-// ── Menu tab ──────────────────────────────────────────────────────────────────
-interface MenuTabProps {
+// ── Menu section ─────────────────────────────────────────────────────────────
+interface MenuSectionProps {
   menu: MenuItem[];
   categories: Category[];
-  onCreate: (data: Partial<MenuItem>) => Promise<void>;
-  onUpdate: (id: number, data: Partial<MenuItem>) => Promise<void>;
-  onDelete: (id: number) => Promise<void>;
+  onSave: (id: number | null, data: DishPayload) => Promise<void>;
+  onToggle: (item: MenuItem) => void;
+  onDelete: (item: MenuItem) => Promise<void>;
+  /** Open pre-filtered to a category (from the Categories screen). */
+  initialCat?: number | null;
 }
-interface MenuForm { name: string; description: string; imageUrl: string; price: string; categoryId: number | ''; isAvailable: boolean; }
+function MenuSection({ menu, categories, onSave, onToggle, onDelete, initialCat }: MenuSectionProps) {
+  const [editing, setEditing]   = useState<MenuItem | 'new' | null>(null);
+  const [deleting, setDeleting] = useState<MenuItem | null>(null);
+  const [query, setQuery]       = useState('');
+  const [cat, setCat]           = useState<number | 'all'>(initialCat ?? 'all');
+  const [avail, setAvail]       = useState<'all' | 'on' | 'off'>('all');
 
-const MenuTab = memo(function MenuTab({ menu, categories, onCreate, onUpdate, onDelete }: MenuTabProps) {
-  const [modal, setModal]   = useState<'new' | MenuItem | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [filter, setFilter] = useState<'all' | 'available' | 'unavailable'>('all');
-  const { show, node } = useToast();
-
-  const emptyForm: MenuForm = { name: '', description: '', imageUrl: '', price: '', categoryId: categories[0]?.id ?? '', isAvailable: true };
-  const [form, setForm] = useState<MenuForm>(emptyForm);
-
-  const openAdd  = () => { setForm({ ...emptyForm, categoryId: categories[0]?.id ?? '' }); setModal('new'); };
-  const openEdit = (it: MenuItem) => { setForm({ name: it.name, description: it.description ?? '', imageUrl: it.imageUrl ?? '', price: String(it.price), categoryId: it.categoryId, isAvailable: it.isAvailable }); setModal(it); };
-  const set      = <K extends keyof MenuForm>(k: K, v: MenuForm[K]) => setForm((p) => ({ ...p, [k]: v }));
-
-  const save = async () => {
-    if (!modal) return;
-    if (!form.name.trim()) return show('Введите название блюда', 'error');
-    if (!form.price || Number(form.price) <= 0) return show('Цена должна быть больше 0', 'error');
-    if (!form.categoryId) return show('Выберите категорию', 'error');
-    setSaving(true);
-    try {
-      const payload = { name: form.name, description: form.description || null, imageUrl: form.imageUrl || null, price: Number(form.price), categoryId: Number(form.categoryId), isAvailable: form.isAvailable };
-      if (modal === 'new') await onCreate(payload);
-      else await onUpdate(modal.id, payload);
-      setModal(null);
-    } finally { setSaving(false); }
-  };
-
-  const displayed = menu.filter((m) =>
-    filter === 'all' ? true : filter === 'available' ? m.isAvailable : !m.isAvailable,
-  );
+  const catName = (m: MenuItem) => m.category?.name ?? categories.find((c) => c.id === m.categoryId)?.name ?? 'Без категории';
+  const shown = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return menu.filter((m) =>
+      (cat === 'all' || m.categoryId === cat) &&
+      (avail === 'all' || (avail === 'on' ? m.isAvailable : !m.isAvailable)) &&
+      (!q || m.name.toLowerCase().includes(q)),
+    );
+  }, [menu, query, cat, avail]);
+  const availableCount = menu.filter((m) => m.isAvailable).length;
+  const filtersActive = query || cat !== 'all' || avail !== 'all';
 
   return (
-    <div className="anim-fade-up" style={S.card}>
-      {node}
-      <div className="flex-col-sm-row" style={{ justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
+    <>
+      <div className="page-header">
         <div>
-          <h2 style={{ margin: 0, fontFamily: "'Playfair Display', serif", color: '#e5e7eb', fontSize: 22 }}>Меню</h2>
-          <p style={{ margin: '4px 0 0', fontSize: 13, color: '#4b5563' }}>{menu.length} позиций · {menu.filter((m) => m.isAvailable).length} доступно</p>
+          <h1 className="page-title">Меню</h1>
+          <p className="page-subtitle">{menu.length} {pluralRu(menu.length, ['блюдо', 'блюда', 'блюд'])} · {availableCount} доступно для заказа</p>
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <select style={{ ...S.select, width: 'auto', minWidth: 150 }} value={filter} onChange={(e) => setFilter(e.target.value as 'all' | 'available' | 'unavailable')}>
-            <option value="all">Все</option>
-            <option value="available">Доступные</option>
-            <option value="unavailable">Недоступные</option>
-          </select>
-          <button style={S.btn()} onClick={openAdd}>+ Добавить</button>
-        </div>
+        <button className="btn btn--primary" onClick={() => setEditing('new')} disabled={categories.length === 0} title={categories.length === 0 ? 'Сначала создайте категорию' : undefined}>
+          <PlusIcon size={18} weight="bold" aria-hidden /> Добавить блюдо
+        </button>
       </div>
 
-      <div style={{ overflowX: 'auto', margin: '0 -8px' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 500 }}>
-          <thead>
-            <tr style={{ borderBottom: '1px solid #1e1e1e' }}>
-              <th style={thStyle}></th>
-              <th style={thStyle}>Название</th>
-              <th style={{ ...thStyle, ...mdHide }} className="table-cell-md">Категория</th>
-              <th style={thStyle}>Цена</th>
-              <th style={{ ...thStyle, ...mdHide }} className="table-cell-md">Статус</th>
-              <th style={thStyle}>Действия</th>
-            </tr>
-          </thead>
-          <tbody className="stagger">
-            {displayed.map((item) => (
-              <tr key={item.id} className="anim-fade" style={{ borderBottom: '1px solid #181818' }}>
-                <td style={{ padding: '8px 12px' }}>
-                  {item.imageUrl ? (
-                    <img src={item.imageUrl} alt={item.name} loading="lazy" style={{ width: 48, height: 36, objectFit: 'cover', borderRadius: 6, display: 'block' }} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                  ) : (
-                    <div style={{ width: 48, height: 36, background: '#1a1a1a', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>🍽</div>
-                  )}
-                </td>
-                <td style={{ padding: '12px', color: '#e5e7eb', fontWeight: 500 }}>{item.name}</td>
-                <td style={{ ...tdStyle, ...mdHide }} className="table-cell-md">{item.category?.name || categories.find((c) => c.id === item.categoryId)?.name || '—'}</td>
-                <td style={{ padding: '12px', color: '#f59e0b', fontWeight: 700, whiteSpace: 'nowrap' }}>{fmt(item.price)}</td>
-                <td style={{ ...tdStyle, ...mdHide }} className="table-cell-md">
-                  <span style={{ fontSize: 12, color: item.isAvailable ? '#10b981' : '#4b5563', fontWeight: 600 }}>
-                    {item.isAvailable ? '✓ Доступно' : '✗ Скрыто'}
-                  </span>
-                </td>
-                <td style={{ padding: '12px' }}>
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                    <button style={{ ...S.btnGhost, padding: '6px 10px', fontSize: 12 }} onClick={() => openEdit(item)}>✏</button>
-                    <button style={{ ...S.btnDanger, padding: '6px 10px', fontSize: 12 }} onClick={() => onDelete(item.id)}>✕</button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {displayed.length === 0 && <EmptyState icon="🍽" text="Нет блюд" />}
-      </div>
-
-      {modal && (
-        <Modal title={modal === 'new' ? 'Новое блюдо' : 'Изменить блюдо'} onClose={() => setModal(null)} maxWidth={560}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div>
-              <label style={S.label}>Название блюда</label>
-              <input style={S.input} value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="Плов узбекский" autoFocus />
-            </div>
-            <div>
-              <label style={S.label}>Описание</label>
-              <textarea style={{ ...S.input, resize: 'vertical', minHeight: 70 }} value={form.description} onChange={(e) => set('description', e.target.value)} placeholder="Краткое описание блюда..." />
-            </div>
-            <div>
-              <label style={S.label}>Фото (URL)</label>
-              <input style={S.input} value={form.imageUrl} onChange={(e) => set('imageUrl', e.target.value)} placeholder="https://images.unsplash.com/..." />
-              {form.imageUrl && (
-                <img src={form.imageUrl} alt="preview" className="anim-fade" style={{ marginTop: 8, width: '100%', height: 120, objectFit: 'cover', borderRadius: 8 }} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-              )}
-            </div>
-            <div className="grid-cols-12">
-              <div>
-                <label style={S.label}>Цена (сомони)</label>
-                <input style={S.input} type="number" step="0.01" value={form.price} onChange={(e) => set('price', e.target.value)} placeholder="55" min="0.01" />
-              </div>
-              <div>
-                <label style={S.label}>Категория</label>
-                <select style={S.select} value={form.categoryId} onChange={(e) => set('categoryId', e.target.value ? Number(e.target.value) : '')}>
-                  {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-              </div>
-            </div>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', background: '#1a1a1a', borderRadius: 8, border: '1px solid #2a2a2a', cursor: 'pointer' }}>
-              <input type="checkbox" checked={form.isAvailable} onChange={(e) => set('isAvailable', e.target.checked)} style={{ accentColor: '#f59e0b', width: 16, height: 16 }} />
-              <span style={{ color: '#d1d5db', fontSize: 14 }}>Доступно для заказа</span>
-            </label>
-            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 4 }}>
-              <button style={S.btnGhost} onClick={() => setModal(null)}>Отмена</button>
-              <button style={{ ...S.btn(), display: 'flex', alignItems: 'center', gap: 8 }} onClick={save} disabled={saving}>
-                {saving && <Spinner size={14} color="#000" />} Сохранить
-              </button>
-            </div>
+      <div className="card">
+        <div className="toolbar" style={{ padding: 'var(--sp-4)', borderBottom: '1px solid var(--border)' }}>
+          <div className="input-wrap input-wrap--lead search">
+            <span className="input-wrap__lead"><MagnifyingGlassIcon size={18} aria-hidden /></span>
+            <input className="input" type="search" placeholder="Поиск по названию" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Поиск по названию" />
           </div>
+          <select className="select" style={{ width: 'auto', minWidth: 180 }} value={cat} onChange={(e) => setCat(e.target.value === 'all' ? 'all' : Number(e.target.value))} aria-label="Категория">
+            <option value="all">Все категории</option>
+            {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          <div className="segmented" role="group" aria-label="Доступность">
+            {([['all', 'Все'], ['on', 'В продаже'], ['off', 'Скрытые']] as const).map(([k, l]) => (
+              <button key={k} type="button" className="segmented__item" aria-pressed={avail === k} onClick={() => setAvail(k)}>{l}</button>
+            ))}
+          </div>
+        </div>
+
+        {shown.length === 0 ? (
+          <EmptyState
+            icon={<BowlFoodIcon size={24} />}
+            title={filtersActive ? 'Ничего не найдено' : 'Меню пока пустое'}
+            text={filtersActive ? 'Измените фильтры или поисковый запрос.' : 'Добавьте первое блюдо — оно сразу появится у официантов.'}
+            action={filtersActive
+              ? <button className="btn" onClick={() => { setQuery(''); setCat('all'); setAvail('all'); }}>Сбросить фильтры</button>
+              : <button className="btn btn--primary" onClick={() => setEditing('new')} disabled={categories.length === 0}><PlusIcon size={16} aria-hidden /> Добавить блюдо</button>}
+          />
+        ) : (
+          <>
+            <div className="table-wrap only-desktop">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th scope="col">Блюдо</th>
+                    <th scope="col">Категория</th>
+                    <th scope="col" className="col-num">Цена</th>
+                    <th scope="col">В продаже</th>
+                    <th scope="col" className="col-actions"><span className="sr-only">Действия</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {shown.map((item) => (
+                    <tr key={item.id}>
+                      <td>
+                        <div className="dish-cell">
+                          <Thumb src={item.imageUrl} />
+                          <div style={{ minWidth: 0 }}>
+                            <div className="dish-cell__name">{item.name}</div>
+                            {item.description && <div className="dish-cell__desc">{item.description}</div>}
+                          </div>
+                        </div>
+                      </td>
+                      <td className="muted">{catName(item)}</td>
+                      <td className="col-num"><strong style={{ fontWeight: 600 }}>{fmt(item.price)}</strong></td>
+                      <td>
+                        <label className="switch">
+                          <input type="checkbox" checked={item.isAvailable} onChange={() => onToggle(item)} aria-label={`${item.name}: в продаже`} />
+                          <span className="switch__track" aria-hidden />
+                        </label>
+                      </td>
+                      <td className="col-actions">
+                        <button className="btn btn--ghost btn--icon btn--sm" onClick={() => setEditing(item)} aria-label={`Изменить: ${item.name}`}><PencilSimpleIcon size={18} /></button>
+                        <button className="btn btn--ghost btn--icon btn--sm btn--icon-danger" onClick={() => setDeleting(item)} aria-label={`Удалить: ${item.name}`}><TrashIcon size={18} /></button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <ul className="mlist only-mobile">
+              {shown.map((item) => (
+                <li key={item.id} className="mlist__item">
+                  <Thumb src={item.imageUrl} />
+                  <div style={{ minWidth: 0 }}>
+                    <div className="dish-cell__name" style={{ overflowWrap: 'anywhere' }}>{item.name}</div>
+                    <div className="muted num" style={{ fontSize: 'var(--fs-sm)' }}>{fmt(item.price)} · {catName(item)}</div>
+                    <label className="switch" style={{ marginTop: 6 }}>
+                      <input type="checkbox" checked={item.isAvailable} onChange={() => onToggle(item)} />
+                      <span className="switch__track" aria-hidden />
+                      <span className="switch__label" style={{ fontSize: 'var(--fs-sm)' }}>В продаже</span>
+                    </label>
+                  </div>
+                  <div className="row" style={{ gap: 2 }}>
+                    <button className="btn btn--ghost btn--icon" onClick={() => setEditing(item)} aria-label={`Изменить: ${item.name}`}><PencilSimpleIcon size={18} /></button>
+                    <button className="btn btn--ghost btn--icon btn--icon-danger" onClick={() => setDeleting(item)} aria-label={`Удалить: ${item.name}`}><TrashIcon size={18} /></button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </div>
+
+      {editing && (
+        <DishForm
+          initial={editing === 'new' ? null : editing}
+          categories={categories}
+          onClose={() => setEditing(null)}
+          onSave={(data) => onSave(editing === 'new' ? null : editing.id, data)}
+        />
+      )}
+      {deleting && (
+        <ConfirmDialog
+          title="Удалить блюдо?"
+          text={<>«{deleting.name}» исчезнет из меню официантов. Прошлые заказы и аналитика сохранятся.</>}
+          confirmLabel="Удалить"
+          danger
+          onConfirm={() => onDelete(deleting)}
+          onClose={() => setDeleting(null)}
+        />
+      )}
+    </>
+  );
+}
+
+// ── Categories section ───────────────────────────────────────────────────────
+interface CategoriesSectionProps {
+  categories: Category[];
+  menu: MenuItem[];
+  onSave: (id: number | null, name: string) => Promise<void>;
+  onDelete: (c: Category) => Promise<void>;
+  onShowDishes: (c: Category) => void;
+}
+function CategoriesSection({ categories, menu, onSave, onDelete, onShowDishes }: CategoriesSectionProps) {
+  const [editing, setEditing]   = useState<Category | 'new' | null>(null);
+  const [deleting, setDeleting] = useState<Category | null>(null);
+  const [name, setName]         = useState('');
+  const [error, setError]       = useState('');
+  const [saving, setSaving]     = useState(false);
+
+  const count = (c: Category) => menu.filter((m) => m.categoryId === c.id).length;
+  const open = (c: Category | 'new') => { setEditing(c); setName(c === 'new' ? '' : c.name); setError(''); };
+
+  const save = async (e: FormEvent) => {
+    e.preventDefault();
+    const n = name.trim();
+    if (!n) { setError('Введите название категории'); return; }
+    if (categories.some((c) => c.name.toLowerCase() === n.toLowerCase() && (editing === 'new' || c.id !== editing?.id))) {
+      setError('Категория с таким названием уже есть'); return;
+    }
+    setSaving(true);
+    try {
+      await onSave(editing === 'new' ? null : editing!.id, n);
+      setEditing(null);
+    } catch (err) { setError((err as Error).message); }
+    finally { setSaving(false); }
+  };
+
+  const deletingCount = deleting ? count(deleting) : 0;
+
+  return (
+    <>
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">Категории</h1>
+          <p className="page-subtitle">Разделы меню, по которым официант ищет блюда</p>
+        </div>
+        <button className="btn btn--primary" onClick={() => open('new')}><PlusIcon size={18} weight="bold" aria-hidden /> Новая категория</button>
+      </div>
+
+      <div className="card">
+        {categories.length === 0 ? (
+          <EmptyState icon={<FolderSimpleIcon size={24} />} title="Категорий пока нет" text="Создайте первую категорию, например «Супы» или «Напитки»."
+            action={<button className="btn btn--primary" onClick={() => open('new')}><PlusIcon size={16} aria-hidden /> Новая категория</button>} />
+        ) : (
+          <ul className="cat-list">
+            {categories.map((c) => {
+              const n = count(c);
+              return (
+                <li key={c.id} className="cat-row">
+                  <span className="cat-row__icon" aria-hidden><TagIcon size={18} /></span>
+                  <div style={{ minWidth: 0 }}>
+                    <div className="cat-row__name">{c.name}</div>
+                    <button type="button" className="cat-row__count" onClick={() => onShowDishes(c)} style={{ background: 'none', border: 0, padding: 0, textDecoration: n ? 'underline' : 'none', textUnderlineOffset: 3 }} disabled={!n}>
+                      {n} {pluralRu(n, ['блюдо', 'блюда', 'блюд'])}
+                    </button>
+                  </div>
+                  <div className="cat-row__actions">
+                    <button className="btn btn--ghost btn--icon" onClick={() => open(c)} aria-label={`Переименовать: ${c.name}`}><PencilSimpleIcon size={18} /></button>
+                    <button className="btn btn--ghost btn--icon btn--icon-danger" onClick={() => setDeleting(c)} aria-label={`Удалить: ${c.name}`}><TrashIcon size={18} /></button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+
+      {editing && (
+        <Modal
+          title={editing === 'new' ? 'Новая категория' : 'Переименовать категорию'}
+          onClose={() => setEditing(null)}
+          width={420}
+          busy={saving}
+          footer={
+            <>
+              <button type="button" className="btn" onClick={() => setEditing(null)} disabled={saving}>Отмена</button>
+              <button type="submit" form="cat-form" className="btn btn--primary" disabled={saving}>{saving && <Spinner />} Сохранить</button>
+            </>
+          }
+        >
+          <form id="cat-form" onSubmit={save} noValidate className="field">
+            <label className="label" htmlFor="cat-name">Название</label>
+            <input id="cat-name" className="input" value={name} maxLength={100} onChange={(e) => { setName(e.target.value); setError(''); }}
+              placeholder="Например, Горячие блюда" aria-invalid={!!error} aria-describedby={error ? 'cat-name-err' : undefined} />
+            {error && <span className="field-error" id="cat-name-err">{error}</span>}
+          </form>
         </Modal>
       )}
-    </div>
+
+      {deleting && deletingCount > 0 && (
+        <Modal
+          title="Категорию нельзя удалить"
+          onClose={() => setDeleting(null)}
+          width={440}
+          footer={
+            <>
+              <button type="button" className="btn" onClick={() => setDeleting(null)}>Понятно</button>
+              <button type="button" className="btn btn--primary" onClick={() => { onShowDishes(deleting); setDeleting(null); }} data-autofocus>Показать блюда</button>
+            </>
+          }
+        >
+          <p style={{ color: 'var(--text-2)' }}>
+            В категории «{deleting.name}» {deletingCount} {pluralRu(deletingCount, ['блюдо', 'блюда', 'блюд'])}. Перенесите их в другую категорию или удалите, затем удалите категорию.
+          </p>
+        </Modal>
+      )}
+      {deleting && deletingCount === 0 && (
+        <ConfirmDialog
+          title="Удалить категорию?"
+          text={<>Категория «{deleting.name}» будет удалена. В ней нет блюд.</>}
+          confirmLabel="Удалить"
+          danger
+          onConfirm={() => onDelete(deleting)}
+          onClose={() => setDeleting(null)}
+        />
+      )}
+    </>
   );
-});
+}
 
-const thStyle = { textAlign: 'left' as const, padding: '10px 12px', color: '#4b5563', fontWeight: 600, fontSize: 11, textTransform: 'uppercase' as const, letterSpacing: '0.06em' };
-const tdStyle = { padding: '12px', color: '#6b7280' };
-const mdHide  = {}; // class-controlled in CSS
-
-// ── AdminView (root) ──────────────────────────────────────────────────────────
-export default function AdminView() {
-  const [tab, setTab]   = useState<'menu' | 'categories' | 'analytics'>('menu');
+// ── AdminView (root) ─────────────────────────────────────────────────────────
+export default function AdminView({ user, onLogout }: { user: User; onLogout: () => void }) {
+  const [section, setSection] = useState<Section>(sectionFromHash);
   const [categories, setCategories] = useState<Category[]>([]);
   const [menu, setMenu] = useState<MenuItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const { show, node } = useToast();
+  const [loadError, setLoadError] = useState('');
+  const toast = useToast();
+
+  const [menuPreset, setMenuPreset] = useState<number | null>(null);
+
+  const go = (s: Section, preset: number | null = null) => {
+    setMenuPreset(preset);
+    setSection(s);
+    if (window.location.hash !== `#${s}`) window.history.replaceState(null, '', `#${s}`);
+    document.getElementById('main')?.focus({ preventScroll: true });
+    window.scrollTo({ top: 0 });
+  };
+
+  useEffect(() => {
+    const onHash = () => setSection(sectionFromHash());
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
 
   const loadAll = useCallback(async () => {
+    setLoadError('');
     try {
       const [cats, items] = await Promise.all([api.getCategories(), api.getMenu()]);
       setCategories(cats); setMenu(items);
-    } finally { setLoading(false); }
+    } catch (e) { setLoadError((e as Error).message); }
+    finally { setLoading(false); }
   }, []);
 
   useEffect(() => { loadAll(); }, [loadAll]);
+  useSocketStatus(loadAll);
 
-  // Real-time subscriptions
+  // HTTP responses and WebSocket events both upsert by id → no duplicates.
   useMenuSocket({
-    onCreated: (item) => setMenu((p) => p.find((x) => x.id === item.id) ? p : [...p, item]),
-    onUpdated: (item) => setMenu((p) => p.map((x) => x.id === item.id ? item : x)),
+    onCreated: (item) => setMenu((p) => upsertById(p, item)),
+    onUpdated: (item) => setMenu((p) => upsertById(p, item)),
     onDeleted: (id)   => setMenu((p) => p.filter((x) => x.id !== id)),
   });
   useCategorySocket({
-    onCreated: (cat) => setCategories((p) => p.find((x) => x.id === cat.id) ? p : [...p, cat]),
-    onUpdated: (cat) => setCategories((p) => p.map((x) => x.id === cat.id ? cat : x)),
+    onCreated: (cat) => setCategories((p) => upsertById(p, cat)),
+    onUpdated: (cat) => setCategories((p) => upsertById(p, cat)),
     onDeleted: (id)  => setCategories((p) => p.filter((x) => x.id !== id)),
   });
 
-  // ── Optimistic CRUD: menu ─────────────────────────────────────────────────
-  const createMenuItem = async (data: Partial<MenuItem>) => {
-    const tempId = -Date.now();
-    const optimistic = { id: tempId, isAvailable: true, ...data, name: data.name || '', price: Number(data.price) || 0, categoryId: Number(data.categoryId) || 0, description: data.description ?? null, imageUrl: data.imageUrl ?? null } as MenuItem;
-    setMenu((p) => [...p, optimistic]);
-    try {
-      const real = await api.createMenuItem(data);
-      setMenu((p) => p.map((x) => x.id === tempId ? real : x));
-      show('Блюдо добавлено');
-    } catch (e) {
-      setMenu((p) => p.filter((x) => x.id !== tempId));
-      show((e as Error).message, 'error');
-      throw e;
-    }
+  const saveDish = async (id: number | null, data: DishPayload) => {
+    const saved = id === null ? await api.createMenuItem(data) : await api.updateMenuItem(id, data);
+    setMenu((p) => upsertById(p, saved));
+    toast(id === null ? `«${saved.name}» добавлено в меню` : 'Изменения сохранены');
   };
-  const updateMenuItem = async (id: number, data: Partial<MenuItem>) => {
-    const prev = menu.find((x) => x.id === id);
-    setMenu((p) => p.map((x) => x.id === id ? { ...x, ...data } as MenuItem : x));
+
+  const toggleDish = async (item: MenuItem) => {
+    const next = !item.isAvailable;
+    setMenu((p) => p.map((x) => (x.id === item.id ? { ...x, isAvailable: next } : x)));
     try {
-      const real = await api.updateMenuItem(id, data);
-      setMenu((p) => p.map((x) => x.id === id ? real : x));
-      show('Блюдо обновлено');
+      const saved = await api.updateMenuItem(item.id, { isAvailable: next });
+      setMenu((p) => upsertById(p, saved));
+      toast(next ? `«${item.name}» снова в продаже` : `«${item.name}» скрыто из меню официантов`);
     } catch (e) {
-      if (prev) setMenu((p) => p.map((x) => x.id === id ? prev : x));
-      show((e as Error).message, 'error');
-      throw e;
-    }
-  };
-  const deleteMenuItem = async (id: number) => {
-    if (!confirm('Удалить блюдо?')) return;
-    const prev = menu.find((x) => x.id === id);
-    setMenu((p) => p.filter((x) => x.id !== id));
-    try {
-      await api.deleteMenuItem(id);
-      show('Удалено');
-    } catch (e) {
-      if (prev) setMenu((p) => [...p, prev]);
-      show((e as Error).message, 'error');
+      setMenu((p) => p.map((x) => (x.id === item.id ? { ...x, isAvailable: item.isAvailable } : x)));
+      toast((e as Error).message, 'error');
     }
   };
 
-  // ── Optimistic CRUD: categories ───────────────────────────────────────────
-  const createCategory = async (name: string) => {
-    const tempId = -Date.now();
-    setCategories((p) => [...p, { id: tempId, name }]);
+  const deleteDish = async (item: MenuItem) => {
     try {
-      const real = await api.createCategory({ name });
-      setCategories((p) => p.map((x) => x.id === tempId ? real : x));
-      show('Категория добавлена');
-    } catch (e) {
-      setCategories((p) => p.filter((x) => x.id !== tempId));
-      show((e as Error).message, 'error');
-      throw e;
-    }
-  };
-  const updateCategory = async (id: number, name: string) => {
-    const prev = categories.find((x) => x.id === id);
-    setCategories((p) => p.map((x) => x.id === id ? { ...x, name } : x));
-    try {
-      const real = await api.updateCategory(id, { name });
-      setCategories((p) => p.map((x) => x.id === id ? real : x));
-      show('Категория обновлена');
-    } catch (e) {
-      if (prev) setCategories((p) => p.map((x) => x.id === id ? prev : x));
-      show((e as Error).message, 'error');
-      throw e;
-    }
-  };
-  const deleteCategory = async (id: number) => {
-    if (!confirm('Удалить категорию?')) return;
-    const prev = categories.find((x) => x.id === id);
-    setCategories((p) => p.filter((x) => x.id !== id));
-    try {
-      await api.deleteCategory(id);
-      show('Удалено');
-    } catch (e) {
-      if (prev) setCategories((p) => [...p, prev]);
-      show((e as Error).message, 'error');
-    }
+      await api.deleteMenuItem(item.id);
+      setMenu((p) => p.filter((x) => x.id !== item.id));
+      toast(`«${item.name}» удалено из меню`);
+    } catch (e) { toast((e as Error).message, 'error'); throw e; }
   };
 
-  if (loading) {
-    return (
-      <div className="anim-fade" style={{ display: 'grid', gap: 14 }}>
-        <Skeleton height={48} radius={10} />
-        <Skeleton height={400} radius={14} />
-      </div>
-    );
-  }
+  const saveCategory = async (id: number | null, name: string) => {
+    const saved = id === null ? await api.createCategory({ name }) : await api.updateCategory(id, { name });
+    setCategories((p) => upsertById(p, saved));
+    if (id !== null) setMenu((p) => p.map((m) => (m.categoryId === id ? { ...m, category: saved } : m)));
+    toast(id === null ? `Категория «${saved.name}» создана` : 'Категория переименована');
+  };
+
+  const deleteCategory = async (c: Category) => {
+    try {
+      await api.deleteCategory(c.id);
+      setCategories((p) => p.filter((x) => x.id !== c.id));
+      toast(`Категория «${c.name}» удалена`);
+    } catch (e) { toast((e as Error).message, 'error'); throw e; }
+  };
+
+  const showDishes = (c: Category) => go('menu', c.id);
+
+  const content = () => {
+    if (section === 'analytics') return <Analytics />;
+    if (loading) return <div className="stack" aria-busy="true"><Skeleton height={48} width={280} /><Skeleton height={420} radius={12} /></div>;
+    if (loadError) {
+      return (
+        <div className="card">
+          <EmptyState icon={<WarningCircleIcon size={24} />} title="Не удалось загрузить данные" text={loadError}
+            action={<button className="btn btn--primary" onClick={() => { setLoading(true); loadAll(); }}><ArrowClockwiseIcon size={16} /> Повторить</button>} />
+        </div>
+      );
+    }
+    if (section === 'menu') {
+      return (
+        <MenuSection initialCat={menuPreset}
+          menu={menu} categories={categories} onSave={saveDish} onToggle={toggleDish} onDelete={deleteDish} />
+      );
+    }
+    return <CategoriesSection categories={categories} menu={menu} onSave={saveCategory} onDelete={deleteCategory} onShowDishes={showDishes} />;
+  };
 
   return (
-    <div>
-      {node}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 24, borderBottom: '1px solid #1a1a1a', paddingBottom: 14, overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-        {(['menu', 'categories', 'analytics'] as const).map((k) => {
-          const labels = { menu: 'Меню', categories: 'Категории', analytics: 'Аналитика' };
-          return (
-            <button key={k} style={{ ...S.tab(tab === k), whiteSpace: 'nowrap' }} onClick={() => setTab(k)}>{labels[k]}</button>
-          );
-        })}
+    <div className="admin">
+      <aside className="sidebar" aria-label="Навигация">
+        <div className="sidebar__brand"><Brand /></div>
+        <nav>
+          <div className="sidebar__section">Управление</div>
+          <div className="nav">
+            {SECTIONS.map((s) => (
+              <button key={s.key} type="button" className="nav__item" aria-current={section === s.key ? 'page' : undefined} onClick={() => go(s.key)}>
+                {s.icon}{s.label}
+              </button>
+            ))}
+          </div>
+        </nav>
+        <div className="sidebar__footer">
+          <UserChip user={user} />
+          <button type="button" className="btn btn--block" onClick={onLogout}><SignOutIcon size={18} aria-hidden /> Выйти</button>
+        </div>
+      </aside>
+
+      <div className="admin__main">
+        <header className="topbar topbar--mobile">
+          <Brand />
+          <span className="topbar__spacer" />
+          <UserChip user={user} />
+          <button type="button" className="btn btn--ghost btn--icon" onClick={onLogout} aria-label="Выйти"><SignOutIcon size={20} /></button>
+        </header>
+        <nav className="admin-tabs" aria-label="Разделы">
+          <div className="segmented segmented--block" style={{ width: '100%' }}>
+            {SECTIONS.map((s) => (
+              <button key={s.key} type="button" className="segmented__item" aria-pressed={section === s.key} onClick={() => go(s.key)}>
+                {s.icon}{s.label}
+              </button>
+            ))}
+          </div>
+        </nav>
+        <main id="main" className="page" tabIndex={-1} style={{ outline: 'none' }}>
+          {content()}
+        </main>
       </div>
-      {tab === 'menu'       && <MenuTab menu={menu} categories={categories} onCreate={createMenuItem} onUpdate={updateMenuItem} onDelete={deleteMenuItem} />}
-      {tab === 'categories' && <CategoriesTab categories={categories} menu={menu} onCreate={createCategory} onUpdate={updateCategory} onDelete={deleteCategory} />}
-      {tab === 'analytics'  && <Analytics />}
     </div>
   );
 }

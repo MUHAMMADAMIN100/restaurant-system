@@ -1,124 +1,261 @@
-import { useState, useEffect, useCallback, memo } from 'react';
-import { api } from '../api/client';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import {
+  PlusIcon, MinusIcon, MagnifyingGlassIcon, ForkKnifeIcon, BowlFoodIcon, ReceiptIcon,
+  MoneyIcon, CreditCardIcon, TrashIcon, WarningCircleIcon, CaretLeftIcon, CaretRightIcon,
+  ShoppingCartSimpleIcon, ArrowClockwiseIcon, ClockIcon, CheckCircleIcon,
+} from '@phosphor-icons/react';
+import { api, ApiError } from '../api/client';
 import type { Order, Category, MenuItem } from '../api/client';
-import { useOrderSocket, useMenuSocket, useCategorySocket } from '../hooks/useSocket';
-import { Spinner, useToast, EmptyState, Modal, Skeleton } from './UI';
-import { S, fmt, timeAgo, STATUS_LABEL, STATUS_COLOR, calcTotal } from '../utils/styles';
+import { useOrderSocket, useMenuSocket, useCategorySocket, useSocketStatus } from '../hooks/useSocket';
+import { useNow } from '../hooks/useNow';
+import { Spinner, useToast, EmptyState, Modal, Skeleton, StatusBadge } from './UI';
+import { fmt, timeAgo, calcTotal, linePrice, pluralRu, upsertById } from '../utils/format';
 
-const PAGE_SIZE = 9;
+const PAGE_SIZE = 12;
+const MAX_TABLE = 50;
+const CART_KEY = 'resto_cart';
+const TABLE_KEY = 'resto_table';
+
+const storage = {
+  get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } },
+  set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* ignore */ } },
+  del: (k: string) => { try { localStorage.removeItem(k); } catch { /* ignore */ } },
+};
+
+type Cart = Record<number, number>;
+interface CartLine { item: MenuItem; qty: number; }
 
 // ── Payment modal ─────────────────────────────────────────────────────────────
-interface PaymentModalProps { order: Order; onClose: () => void; onDone: () => void; }
-function PaymentModal({ order, onClose, onDone }: PaymentModalProps) {
+interface PaymentModalProps { order: Order; onClose: () => void; onPaid: (orderId: number) => void; }
+function PaymentModal({ order, onClose, onPaid }: PaymentModalProps) {
   const [type, setType]       = useState<'CASH' | 'CARD'>('CASH');
   const [loading, setLoading] = useState(false);
+  const [error, setError]     = useState('');
+  const toast = useToast();
   const total = calcTotal(order);
 
   const confirm = async () => {
-    setLoading(true);
+    setLoading(true); setError('');
     try {
-      await api.createPayment({ orderId: order.id, amount: total, type });
-      onDone();
+      await api.createPayment({ orderId: order.id, type });
+      onPaid(order.id);
+      toast(`Стол ${order.tableNumber}: оплата ${fmt(total)} принята`);
     } catch (e) {
-      alert((e as Error).message);
+      if (e instanceof ApiError && e.status === 409) { onPaid(order.id); toast('Этот заказ уже оплачен', 'error'); return; }
+      setError((e as Error).message);
       setLoading(false);
     }
   };
 
   return (
-    <Modal title="Оплата заказа" onClose={onClose} maxWidth={420}>
-      <div className="anim-fade-up" style={{ background: '#1a1a1a', borderRadius: 10, padding: 16, marginBottom: 18 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 14, gap: 10 }}>
-          <span style={{ fontFamily: "'Playfair Display', serif", color: '#e5e7eb', fontSize: 16 }}>Стол #{order.tableNumber}</span>
-          <span style={{ fontSize: 12, color: '#4b5563' }}>{timeAgo(order.createdAt)}</span>
+    <Modal
+      title={`Оплата · стол ${order.tableNumber}`}
+      onClose={onClose}
+      width={440}
+      busy={loading}
+      footer={
+        <>
+          <button type="button" className="btn" onClick={onClose} disabled={loading}>Отмена</button>
+          <button type="button" className="btn btn--primary" onClick={confirm} disabled={loading} data-autofocus>
+            {loading && <Spinner />} Принять {fmt(total)}
+          </button>
+        </>
+      }
+    >
+      <div className="stack">
+        <div className="receipt">
+          <div className="receipt__head"><span>Заказ № {order.id}</span><span>{timeAgo(order.createdAt)}</span></div>
+          {(order.items || []).map((it) => (
+            <div key={it.id} className="receipt__line">
+              <span>{it.menuItem?.name ?? 'Блюдо'} × {it.quantity}</span>
+              <span>{fmt(linePrice(it) * it.quantity)}</span>
+            </div>
+          ))}
+          <div className="receipt__total"><span>Итого</span><strong>{fmt(total)}</strong></div>
         </div>
-        {(order.items || []).map((it) => (
-          <div key={it.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#9ca3af', marginBottom: 7, gap: 10 }}>
-            <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.menuItem?.name || '?'} ×{it.quantity}</span>
-            <span style={{ flexShrink: 0 }}>{fmt(Number(it.menuItem?.price || 0) * it.quantity)}</span>
+
+        <div className="field">
+          <span className="label" id="pay-method">Способ оплаты</span>
+          <div className="pay-methods" role="radiogroup" aria-labelledby="pay-method">
+            {([['CASH', 'Наличные', <MoneyIcon key="m" size={24} />], ['CARD', 'Карта', <CreditCardIcon key="c" size={24} />]] as const).map(([t, label, icon]) => (
+              <button
+                key={t} type="button" role="radio" aria-checked={type === t} className="pay-method"
+                onClick={() => setType(t)}
+              >
+                {type === t && <CheckCircleIcon size={18} weight="fill" className="pay-method__check" aria-hidden />}
+                {icon}{label}
+              </button>
+            ))}
           </div>
-        ))}
-        <div style={{ borderTop: '1px solid #262626', paddingTop: 12, marginTop: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{ color: '#6b7280', fontSize: 13 }}>ИТОГО</span>
-          <span style={{ fontWeight: 800, color: '#f59e0b', fontSize: 24, fontFamily: "'Playfair Display', serif" }}>{fmt(total)}</span>
         </div>
-      </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 18 }}>
-        {([['CASH', '💵 Наличные'], ['CARD', '💳 Карта']] as [string, string][]).map(([t, l]) => (
-          <button key={t} onClick={() => setType(t as 'CASH' | 'CARD')} style={{
-            padding: '14px 0', borderRadius: 10, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif",
-            fontWeight: 600, fontSize: 13,
-            background: type === t ? '#f59e0b' : '#1a1a1a',
-            color: type === t ? '#000' : '#6b7280',
-            border: `1px solid ${type === t ? '#f59e0b' : '#2a2a2a'}`,
-            transition: 'all 0.2s var(--ease-out)',
-          }}>{l}</button>
-        ))}
+        {error && <div className="alert" role="alert"><WarningCircleIcon size={18} aria-hidden />{error}</div>}
       </div>
-
-      <button
-        style={{ ...S.btn('#10b981', '#fff'), width: '100%', padding: '14px 0', fontSize: 15, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}
-        onClick={confirm} disabled={loading}
-      >
-        {loading && <Spinner size={16} color="#fff" />}
-        Принять оплату · {fmt(total)}
-      </button>
     </Modal>
   );
 }
 
-// ── Active orders list ────────────────────────────────────────────────────────
-interface ActiveOrdersProps { orders: Order[]; onPayOrder: (o: Order) => void; }
-const ActiveOrders = memo(function ActiveOrders({ orders, onPayOrder }: ActiveOrdersProps) {
-  const [page, setPage] = useState(1);
-  const active = orders.filter((o) => o.status !== 'CLOSED');
-  const totalPages = Math.ceil(active.length / PAGE_SIZE);
-  const paged = active.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+// ── Active orders ─────────────────────────────────────────────────────────────
+type OrderFilter = 'all' | 'ready' | 'kitchen';
+const STATUS_ORDER = { READY: 0, COOKING: 1, PENDING: 2, CLOSED: 3 } as const;
 
-  if (active.length === 0) return <EmptyState icon="📋" text="Нет активных заказов" />;
+function ActiveOrders({ orders, onPay }: { orders: Order[]; onPay: (o: Order) => void }) {
+  const [page, setPage]     = useState(1);
+  const [filter, setFilter] = useState<OrderFilter>('all');
+  const now = useNow();
+
+  const active = useMemo(() => orders
+    .filter((o) => o.status !== 'CLOSED')
+    .filter((o) => filter === 'all' || (filter === 'ready' ? o.status === 'READY' : o.status !== 'READY'))
+    .sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || +new Date(a.createdAt) - +new Date(b.createdAt)),
+  [orders, filter]);
+
+  const readyCount = orders.filter((o) => o.status === 'READY').length;
+  const totalPages = Math.max(1, Math.ceil(active.length / PAGE_SIZE));
+  const current = Math.min(page, totalPages); // never land on an empty page when orders close
+  const paged = active.slice((current - 1) * PAGE_SIZE, current * PAGE_SIZE);
+
+  useEffect(() => { if (page > totalPages) setPage(totalPages); }, [page, totalPages]);
 
   return (
-    <div className="anim-fade-up">
-      <div className="grid-cols-123 stagger" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 14 }}>
-        {paged.map((order) => (
-          <div key={order.id} className="anim-fade-up card-hover" style={{ ...S.card, border: `1px solid ${STATUS_COLOR[order.status]}33`, borderTop: `3px solid ${STATUS_COLOR[order.status]}`, padding: 18 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14, gap: 10 }}>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 17, color: '#e5e7eb' }}>Стол #{order.tableNumber}</div>
-                <div style={{ fontSize: 11, color: '#4b5563', marginTop: 4 }}>{timeAgo(order.createdAt)}</div>
-              </div>
-              <span style={{ ...S.badge(order.status), flexShrink: 0 }}>{STATUS_LABEL[order.status]}</span>
-            </div>
+    <section aria-label="Активные заказы">
+      <div className="page-header" style={{ alignItems: 'center' }}>
+        <div role="group" aria-label="Фильтр заказов" className="chips">
+          {([['all', 'Все'], ['ready', `К оплате${readyCount ? ` · ${readyCount}` : ''}`], ['kitchen', 'На кухне']] as const).map(([k, l]) => (
+            <button key={k} type="button" className="chip" aria-pressed={filter === k} onClick={() => { setFilter(k); setPage(1); }}>{l}</button>
+          ))}
+        </div>
+      </div>
 
-            {(order.items || []).map((it) => (
-              <div key={it.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#9ca3af', marginBottom: 6, gap: 10 }}>
-                <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.menuItem?.name || '?'}</span>
-                <span style={{ color: '#6b7280', flexShrink: 0 }}>×{it.quantity}</span>
-              </div>
+      {active.length === 0 ? (
+        <div className="card">
+          <EmptyState
+            icon={<ReceiptIcon size={24} />}
+            title={filter === 'ready' ? 'Нет заказов к оплате' : 'Активных заказов нет'}
+            text={filter === 'all' ? 'Новые заказы появятся здесь сразу после отправки на кухню.' : undefined}
+          />
+        </div>
+      ) : (
+        <>
+          <div className="tickets">
+            {paged.map((order) => (
+              <article key={order.id} className={`card ticket ${order.status === 'READY' ? 'is-ready' : ''}`} aria-label={`Стол ${order.tableNumber}`}>
+                <div className="ticket__head">
+                  <div>
+                    <div className="ticket__table">Стол {order.tableNumber}</div>
+                    <div className="ticket__meta"><span>№ {order.id}</span><span aria-hidden>·</span><ClockIcon size={12} aria-hidden /><span>{timeAgo(order.createdAt, now)}</span></div>
+                  </div>
+                  <StatusBadge status={order.status} />
+                </div>
+                <ul className="ticket__items">
+                  {(order.items || []).map((it) => (
+                    <li key={it.id} className="ticket__item">
+                      <span className="ticket__item-name">{it.menuItem?.name ?? 'Блюдо'}</span>
+                      <span className="ticket__item-qty">× {it.quantity}</span>
+                    </li>
+                  ))}
+                </ul>
+                <div className="ticket__foot">
+                  <span className="ticket__total">{fmt(calcTotal(order))}</span>
+                  {order.status === 'READY'
+                    ? <button type="button" className="btn btn--primary" onClick={() => onPay(order)}><CreditCardIcon size={18} aria-hidden /> Оплата</button>
+                    : <span className="muted" style={{ fontSize: 'var(--fs-sm)' }}>Ждём кухню</span>}
+                </div>
+              </article>
             ))}
+          </div>
+          {totalPages > 1 && (
+            <nav className="pager" aria-label="Страницы заказов">
+              <button type="button" className="btn btn--icon" onClick={() => setPage(current - 1)} disabled={current === 1} aria-label="Предыдущая страница"><CaretLeftIcon size={18} /></button>
+              <span className="pager__info">Страница {current} из {totalPages}</span>
+              <button type="button" className="btn btn--icon" onClick={() => setPage(current + 1)} disabled={current === totalPages} aria-label="Следующая страница"><CaretRightIcon size={18} /></button>
+            </nav>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
 
-            <div style={{ borderTop: '1px solid #1a1a1a', marginTop: 12, paddingTop: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-              <span style={{ fontWeight: 700, color: '#f59e0b' }}>{fmt(calcTotal(order))}</span>
-              {order.status === 'READY' && (
-                <button className="anim-pulse-glow" style={S.btn('#10b981', '#fff')} onClick={() => onPayOrder(order)}>💳 Оплатить</button>
-              )}
+// ── Cart panel (desktop sidebar + mobile sheet) ───────────────────────────────
+interface CartPanelProps {
+  lines: CartLine[];
+  total: number;
+  tableNumber: string;
+  tableError: string;
+  onTable: (v: string) => void;
+  onAdd: (id: number) => void;
+  onRemove: (id: number) => void;
+  onClear: () => void;
+  onSubmit: () => void;
+  submitting: boolean;
+  idPrefix: string;
+}
+function CartPanel({ lines, total, tableNumber, tableError, onTable, onAdd, onRemove, onClear, onSubmit, submitting, idPrefix }: CartPanelProps) {
+  const qty = lines.reduce((s, l) => s + l.qty, 0);
+  const unavailable = lines.filter((l) => !l.item.isAvailable);
+  const tableId = `${idPrefix}-table`;
+  return (
+    <>
+      <div className="cart__section" style={{ borderBottom: '1px solid var(--border)' }}>
+        <div className="field">
+          <label className="label" htmlFor={tableId}>Номер стола <span className="req" aria-hidden>*</span></label>
+          <input
+            id={tableId} className="input num" type="number" inputMode="numeric" min={1} max={MAX_TABLE}
+            value={tableNumber} onChange={(e) => onTable(e.target.value)} placeholder={`1–${MAX_TABLE}`}
+            aria-invalid={!!tableError} aria-describedby={tableError ? `${tableId}-err` : undefined}
+          />
+          {tableError && <span className="field-error" id={`${tableId}-err`}><WarningCircleIcon size={14} aria-hidden />{tableError}</span>}
+        </div>
+      </div>
+
+      <div className="cart__items">
+        {lines.length === 0 ? (
+          <div className="cart-empty">
+            <ShoppingCartSimpleIcon size={28} aria-hidden />
+            <span>Нажмите на блюдо, чтобы добавить его в заказ</span>
+          </div>
+        ) : lines.map(({ item, qty: q }) => (
+          <div key={item.id} className="cart-line">
+            <div className="cart-line__info">
+              <div className="cart-line__name">{item.name}</div>
+              <div className="cart-line__price">
+                {item.isAvailable ? `${fmt(item.price)} за шт.` : <span style={{ color: 'var(--danger-fg)' }}>Сейчас недоступно</span>}
+              </div>
+            </div>
+            <div className="stepper stepper--sm">
+              <button type="button" className="stepper__btn" onClick={() => onRemove(item.id)} aria-label={`Убрать одну порцию: ${item.name}`}><MinusIcon size={14} weight="bold" /></button>
+              <span className="stepper__value" aria-live="polite">{q}</span>
+              <button type="button" className="stepper__btn" onClick={() => onAdd(item.id)} disabled={!item.isAvailable} aria-label={`Добавить порцию: ${item.name}`}><PlusIcon size={14} weight="bold" /></button>
             </div>
           </div>
         ))}
       </div>
-      {totalPages > 1 && (
-        <div style={{ display: 'flex', justifyContent: 'center', gap: 6, marginTop: 24, flexWrap: 'wrap' }} role="navigation" aria-label="Страницы заказов">
-          <button style={{ ...S.btnGhost, opacity: page === 1 ? 0.4 : 1 }} onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} aria-label="Назад">←</button>
-          {Array.from({ length: totalPages }, (_, i) => (
-            <button key={i + 1} style={S.tab(page === i + 1)} onClick={() => setPage(i + 1)} aria-current={page === i + 1 ? 'page' : undefined}>{i + 1}</button>
-          ))}
-          <button style={{ ...S.btnGhost, opacity: page === totalPages ? 0.4 : 1 }} onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages} aria-label="Вперёд">→</button>
+
+      <div className="cart__foot">
+        {unavailable.length > 0 && (
+          <div className="alert" role="alert"><WarningCircleIcon size={18} aria-hidden />Уберите недоступные блюда, чтобы отправить заказ</div>
+        )}
+        <div className="cart__total">
+          <span className="cart__total-label">{qty > 0 ? `${qty} ${pluralRu(qty, ['позиция', 'позиции', 'позиций'])}` : 'Итого'}</span>
+          <span className="cart__total-value">{fmt(total)}</span>
         </div>
-      )}
-    </div>
+        <button
+          type="button" className="btn btn--primary btn--lg btn--block" onClick={onSubmit}
+          disabled={lines.length === 0 || unavailable.length > 0 || submitting}
+        >
+          {submitting && <Spinner />}
+          {submitting ? 'Отправляем…' : 'Отправить на кухню'}
+        </button>
+        {lines.length > 0 && (
+          <button type="button" className="btn btn--ghost btn--sm" onClick={onClear} disabled={submitting} style={{ justifySelf: 'center' }}>
+            <TrashIcon size={16} aria-hidden /> Очистить заказ
+          </button>
+        )}
+      </div>
+    </>
   );
-});
+}
 
 // ── WaiterView (root) ─────────────────────────────────────────────────────────
 export default function WaiterView() {
@@ -127,338 +264,260 @@ export default function WaiterView() {
   const [menu, setMenu]             = useState<MenuItem[]>([]);
   const [orders, setOrders]         = useState<Order[]>([]);
   const [loading, setLoading]       = useState(true);
+  const [loadError, setLoadError]   = useState('');
   const [selectedCat, setSelectedCat] = useState<number | null>(null);
-  const [cart, setCart]             = useState<Record<number, number>>(() => {
-    try { return JSON.parse(localStorage.getItem('resto_cart') || '{}'); }
-    catch { return {}; }
+  const [query, setQuery]           = useState('');
+  const [cart, setCart]             = useState<Cart>(() => {
+    try { return JSON.parse(storage.get(CART_KEY) || '{}'); } catch { return {}; }
   });
-  const [tableNumber, setTableNumber] = useState(
-    () => localStorage.getItem('resto_table') || ''
-  );
+  const [tableNumber, setTableNumber] = useState(() => storage.get(TABLE_KEY) || '');
+  const [tableError, setTableError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [payOrder, setPayOrder]     = useState<Order | null>(null);
-  const [mobileCart, setMobileCart] = useState(false);
-  const { show, node } = useToast();
+  const [cartOpen, setCartOpen]     = useState(false);
+  const toast = useToast();
 
   const loadData = useCallback(async () => {
+    setLoadError('');
     try {
       const [cats, items, ords] = await Promise.all([api.getCategories(), api.getMenu(), api.getOrders()]);
       setCategories(cats); setMenu(items); setOrders(ords);
+    } catch (e) {
+      setLoadError((e as Error).message);
     } finally { setLoading(false); }
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
+  useSocketStatus(loadData);
 
-  // Real-time updates via WebSocket
+  useEffect(() => { storage.set(CART_KEY, JSON.stringify(cart)); }, [cart]);
+  useEffect(() => { storage.set(TABLE_KEY, tableNumber); }, [tableNumber]);
+
   useOrderSocket({
-    onNew: (o) => setOrders((p) => {
-      // If we already have this order (by id), skip
-      if (p.find((x) => x.id === o.id)) return p;
-      // If we have an optimistic clone (negative id, same table, created within 15s), replace it
-      const optimisticIdx = p.findIndex((x) =>
-        x.id < 0 &&
-        x.tableNumber === o.tableNumber &&
-        Math.abs(new Date(x.createdAt).getTime() - new Date(o.createdAt).getTime()) < 15000
-      );
-      if (optimisticIdx !== -1) {
-        const next = [...p];
-        next[optimisticIdx] = o;
-        return next;
-      }
-      return [o, ...p];
-    }),
-    onStatus: (o) => setOrders((p) => p.map((x) => x.id === o.id ? o : x)),
-    onClosed: (o) => setOrders((p) => p.map((x) => x.id === o.id ? o : x)),
+    onNew:    (o) => setOrders((p) => upsertById(p, o, 'start')),
+    onStatus: (o) => {
+      setOrders((p) => upsertById(p, o, 'start'));
+      if (o.status === 'READY') toast(`Стол ${o.tableNumber}: заказ готов`);
+    },
+    onClosed: (o) => setOrders((p) => upsertById(p, o, 'start')),
   });
   useMenuSocket({
-    onCreated: (item) => setMenu((p) => p.find((x) => x.id === item.id) ? p : [...p, item]),
-    onUpdated: (item) => setMenu((p) => p.map((x) => x.id === item.id ? item : x)),
+    onCreated: (item) => setMenu((p) => upsertById(p, item)),
+    onUpdated: (item) => setMenu((p) => upsertById(p, item)),
     onDeleted: (id)   => setMenu((p) => p.filter((x) => x.id !== id)),
   });
   useCategorySocket({
-    onCreated: (cat) => setCategories((p) => p.find((x) => x.id === cat.id) ? p : [...p, cat]),
-    onUpdated: (cat) => setCategories((p) => p.map((x) => x.id === cat.id ? cat : x)),
-    onDeleted: (id)  => setCategories((p) => p.filter((x) => x.id !== id)),
+    onCreated: (cat) => setCategories((p) => upsertById(p, cat)),
+    onUpdated: (cat) => setCategories((p) => upsertById(p, cat)),
+    onDeleted: (id)  => { setCategories((p) => p.filter((x) => x.id !== id)); setSelectedCat((c) => (c === id ? null : c)); },
   });
 
-  const addToCart = (id: number) => setCart((p) => {
-    const n = { ...p, [id]: (p[id] ?? 0) + 1 };
-    localStorage.setItem('resto_cart', JSON.stringify(n));
-    return n;
-  });
+  const addToCart = (id: number) => setCart((p) => ({ ...p, [id]: Math.min((p[id] ?? 0) + 1, 99) }));
   const removeFromCart = (id: number) => setCart((p) => {
     const n = { ...p };
-    if (n[id] > 1) n[id]--;
-    else delete n[id];
-    localStorage.setItem('resto_cart', JSON.stringify(n));
+    if ((n[id] ?? 0) > 1) n[id]--; else delete n[id];
     return n;
   });
-  const cartItems = Object.entries(cart)
+  const clearCart = () => setCart({});
+
+  const lines: CartLine[] = Object.entries(cart)
     .map(([id, qty]) => ({ item: menu.find((m) => m.id === Number(id)), qty }))
-    .filter((x): x is { item: MenuItem; qty: number } => x.item !== undefined);
-  const cartTotal = cartItems.reduce((s, { item, qty }) => s + Number(item.price) * qty, 0);
-  const cartQty   = cartItems.reduce((s, { qty }) => s + qty, 0);
+    .filter((x): x is CartLine => x.item !== undefined);
+  const cartTotal = lines.reduce((s, { item, qty }) => s + Number(item.price) * qty, 0);
+  const cartQty   = lines.reduce((s, { qty }) => s + qty, 0);
+
+  const onTable = (v: string) => { setTableNumber(v); if (tableError) setTableError(''); };
 
   const submitOrder = async () => {
-    if (!tableNumber) return show('Укажите номер стола', 'error');
-    if (Number(tableNumber) < 1 || Number(tableNumber) > 50) return show('Номер стола от 1 до 50', 'error');
-    if (cartItems.length === 0) return show('Добавьте блюда в заказ', 'error');
+    const t = Number(tableNumber);
+    // On phones/tablets the cart lives in a sheet — open it so the error is visible. On desktop it's the sidebar.
+    const revealCart = () => { if (window.matchMedia('(max-width: 1023px)').matches) setCartOpen(true); };
+    if (!tableNumber) { setTableError('Укажите номер стола'); revealCart(); return; }
+    if (!Number.isInteger(t) || t < 1 || t > MAX_TABLE) { setTableError(`Номер стола от 1 до ${MAX_TABLE}`); revealCart(); return; }
+    if (lines.length === 0) return;
 
-    // Optimistic order with temp id
-    const tempId = -Date.now();
-    const optimisticOrder: Order = {
-      id: tempId,
-      tableNumber: Number(tableNumber),
-      status: 'PENDING',
-      items: cartItems.map(({ item, qty }, idx) => ({
-        id: -(idx + 1),
-        menuItemId: item.id,
-        menuItem: item,
-        quantity: qty,
-      })),
-      createdAt: new Date().toISOString(),
-    };
-    setOrders((p) => [optimisticOrder, ...p]);
-    setCart({});
-    setTableNumber('');
-    localStorage.removeItem('resto_cart');
-    localStorage.removeItem('resto_table');
-    setMobileCart(false);
-    show('Заказ отправлен на кухню!');
     setSubmitting(true);
-
     try {
-      const real = await api.createOrder({
-        tableNumber: optimisticOrder.tableNumber,
-        items: cartItems.map(({ item, qty }) => ({ menuItemId: item.id, quantity: qty })),
+      const created = await api.createOrder({
+        tableNumber: t,
+        items: lines.map(({ item, qty }) => ({ menuItemId: item.id, quantity: qty })),
       });
-      // Replace optimistic by id; if WS already replaced it, ensure no duplicate
-      setOrders((p) => {
-        const hasReal = p.some((x) => x.id === real.id);
-        if (hasReal) return p.filter((x) => x.id !== tempId);
-        return p.map((x) => x.id === tempId ? real : x);
-      });
+      // The WebSocket may have delivered it already — upsert keeps a single copy.
+      setOrders((p) => upsertById(p, created, 'start'));
+      // Clear only after the server confirmed, so nothing is lost on failure.
+      clearCart();
+      setTableNumber('');
+      setCartOpen(false);
+      toast(`Заказ для стола ${t} отправлен на кухню`);
     } catch (e) {
-      setOrders((p) => p.filter((x) => x.id !== tempId));
-      show((e as Error).message, 'error');
+      toast((e as Error).message, 'error');
+      loadData(); // refresh availability so the cart shows what changed
     } finally {
       setSubmitting(false);
     }
   };
 
-  const handlePayDone = () => {
-    const id = payOrder?.id;
+  const handlePaid = (id: number) => {
     setPayOrder(null);
-    if (id) setOrders((p) => p.map((x) => x.id === id ? { ...x, status: 'CLOSED' } : x));
-    show('Оплата принята! Заказ закрыт.');
+    setOrders((p) => p.map((x) => (x.id === id ? { ...x, status: 'CLOSED' } : x)));
   };
+
+  const filteredMenu = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return menu.filter((m) =>
+      m.isAvailable &&
+      (!selectedCat || m.categoryId === selectedCat) &&
+      (!q || m.name.toLowerCase().includes(q) || (m.description ?? '').toLowerCase().includes(q)),
+    );
+  }, [menu, selectedCat, query]);
 
   if (loading) {
     return (
-      <div className="anim-fade" style={{ display: 'grid', gap: 14 }}>
-        <Skeleton height={42} radius={10} />
-        <div className="grid-cols-1234">
-          {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => <Skeleton key={i} height={240} radius={14} />)}
-        </div>
+      <div className="stack" aria-busy="true">
+        <Skeleton height={42} width={320} />
+        <div className="menu-grid">{Array.from({ length: 8 }, (_, i) => <Skeleton key={i} height={250} radius={12} />)}</div>
+      </div>
+    );
+  }
+
+  if (loadError && menu.length === 0) {
+    return (
+      <div className="card">
+        <EmptyState
+          icon={<WarningCircleIcon size={24} />}
+          title="Не удалось загрузить данные"
+          text={loadError}
+          action={<button className="btn btn--primary" onClick={() => { setLoading(true); loadData(); }}><ArrowClockwiseIcon size={16} /> Повторить</button>}
+        />
       </div>
     );
   }
 
   const activeCount = orders.filter((o) => o.status !== 'CLOSED').length;
-  const filteredMenu = menu.filter((m) => m.isAvailable && (!selectedCat || m.categoryId === selectedCat));
+  const readyCount = orders.filter((o) => o.status === 'READY').length;
+  const panelProps = {
+    lines, total: cartTotal, tableNumber, tableError, onTable, onAdd: addToCart, onRemove: removeFromCart,
+    onClear: clearCart, onSubmit: submitOrder, submitting,
+  };
 
   return (
     <div>
-      {node}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 22, borderBottom: '1px solid #1a1a1a', paddingBottom: 14, overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-        <button style={{ ...S.tab(tab === 'new'), whiteSpace: 'nowrap' }} onClick={() => setTab('new')}>Новый заказ</button>
-        <button style={{ ...S.tab(tab === 'orders'), whiteSpace: 'nowrap' }} onClick={() => setTab('orders')}>
-          Активные заказы
-          {activeCount > 0 && <span style={{ marginLeft: 8, background: '#f59e0b', color: '#000', borderRadius: 10, padding: '1px 8px', fontSize: 11, fontWeight: 700 }}>{activeCount}</span>}
-        </button>
+      <div className="page-header">
+        <div role="tablist" aria-label="Раздел" className="segmented">
+          <button type="button" role="tab" className="segmented__item" aria-selected={tab === 'new'} onClick={() => setTab('new')}>
+            <ForkKnifeIcon size={18} aria-hidden /> Новый заказ
+          </button>
+          <button type="button" role="tab" className="segmented__item" aria-selected={tab === 'orders'} onClick={() => setTab('orders')}>
+            <ReceiptIcon size={18} aria-hidden /> Заказы
+            {activeCount > 0 && <span className={`count ${readyCount ? '' : 'count--muted'}`} aria-label={`${activeCount} активных, ${readyCount} готовы`}>{activeCount}</span>}
+          </button>
+        </div>
       </div>
 
       {tab === 'new' && (
-        <div className="menu-cart-layout">
-          {/* LEFT: menu browser */}
-          <div className="anim-fade-up">
-            <div style={{ display: 'flex', gap: 8, marginBottom: 18, flexWrap: 'wrap' }}>
-              <button style={{ ...S.tab(!selectedCat), padding: '6px 14px' }} onClick={() => setSelectedCat(null)}>Все</button>
-              {categories.map((c) => (
-                <button key={c.id} style={{ ...S.tab(selectedCat === c.id), padding: '6px 14px', whiteSpace: 'nowrap' }} onClick={() => setSelectedCat(selectedCat === c.id ? null : c.id)}>{c.name}</button>
-              ))}
+        <div className="order-layout">
+          <section aria-label="Меню">
+            <div className="menu-filters">
+              <div className="input-wrap input-wrap--lead">
+                <span className="input-wrap__lead"><MagnifyingGlassIcon size={18} aria-hidden /></span>
+                <input className="input" type="search" placeholder="Найти блюдо" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Поиск по меню" />
+              </div>
+              <div className="chips" role="group" aria-label="Категории">
+                <button type="button" className="chip" aria-pressed={!selectedCat} onClick={() => setSelectedCat(null)}>Все</button>
+                {categories.map((c) => (
+                  <button key={c.id} type="button" className="chip" aria-pressed={selectedCat === c.id} onClick={() => setSelectedCat(selectedCat === c.id ? null : c.id)}>{c.name}</button>
+                ))}
+              </div>
             </div>
 
-            {filteredMenu.length === 0 && <EmptyState icon="🍽" text="Нет доступных блюд" />}
-            <div className="grid-cols-1234 stagger">
-              {filteredMenu.map((item) => (
-                <div key={item.id} onClick={() => addToCart(item.id)} className="anim-fade-up img-zoom" style={{
-                  background: '#141414', border: `1px solid ${cart[item.id] ? '#f59e0b' : '#222'}`,
-                  borderRadius: 14, overflow: 'hidden', cursor: 'pointer', position: 'relative',
-                  transition: 'border-color 0.2s, box-shadow 0.2s, transform 0.2s var(--ease-out)',
-                  boxShadow: cart[item.id] ? '0 0 0 2px #f59e0b55, 0 8px 24px rgba(245,158,11,0.18)' : 'none',
-                  transform: cart[item.id] ? 'translateY(-2px)' : 'none',
-                }}>
-                  <div style={{ height: 130, background: '#1a1a1a', overflow: 'hidden', position: 'relative' }}>
-                    {item.imageUrl ? (
-                      <img
-                        src={item.imageUrl}
-                        alt={item.name}
-                        loading="lazy"
-                        style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-                        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                      />
-                    ) : (
-                      <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 40 }}>🍽</div>
-                    )}
-                    {cart[item.id] > 0 && (
-                      <span className="anim-pop" key={cart[item.id]} style={{ position: 'absolute', top: 8, right: 8, background: '#f59e0b', color: '#000', minWidth: 24, height: 24, padding: '0 7px', borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 800, boxShadow: '0 2px 8px rgba(0,0,0,0.5)' }}>{cart[item.id]}</span>
-                    )}
-                  </div>
-                  <div style={{ padding: '12px 14px 14px' }}>
-                    <div style={{ fontSize: 10, color: '#4b5563', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                      {item.category?.name || categories.find((c) => c.id === item.categoryId)?.name}
-                    </div>
-                    <div style={{ fontWeight: 600, color: '#e5e7eb', marginBottom: 8, fontSize: 13, lineHeight: 1.4 }}>{item.name}</div>
-                    {item.description && (
-                      <div style={{ fontSize: 11, color: '#4b5563', marginBottom: 8, lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{item.description}</div>
-                    )}
-                    <div style={{ color: '#f59e0b', fontWeight: 700, fontSize: 15 }}>{fmt(item.price)}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+            {filteredMenu.length === 0 ? (
+              <div className="card">
+                <EmptyState
+                  icon={<BowlFoodIcon size={24} />}
+                  title={query ? 'Ничего не найдено' : 'В этой категории пока нет блюд'}
+                  text={query ? `По запросу «${query}» блюд нет. Попробуйте другое название.` : undefined}
+                  action={query ? <button className="btn" onClick={() => setQuery('')}>Сбросить поиск</button> : undefined}
+                />
+              </div>
+            ) : (
+              <div className="menu-grid">
+                {filteredMenu.map((item) => {
+                  const q = cart[item.id] ?? 0;
+                  const catName = item.category?.name ?? categories.find((c) => c.id === item.categoryId)?.name;
+                  return (
+                    <article key={item.id} className={`dish ${q ? 'is-selected' : ''}`}>
+                      <button type="button" className="dish__main" onClick={() => addToCart(item.id)} aria-label={`${item.name}, ${fmt(item.price)}, добавить в заказ`}>
+                        <span className="dish__media">
+                          <span className="dish__placeholder" aria-hidden><BowlFoodIcon size={32} /></span>
+                          {item.imageUrl && (
+                            <img src={item.imageUrl} alt="" loading="lazy" width={400} height={300}
+                              style={{ position: 'relative' }}
+                              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                          )}
+                          {q > 0 && <span className="dish__qty" aria-hidden>{q}</span>}
+                        </span>
+                        <span className="dish__body">
+                          {catName && <span className="dish__cat">{catName}</span>}
+                          <span className="dish__name">{item.name}</span>
+                          {item.description && <span className="dish__desc">{item.description}</span>}
+                        </span>
+                      </button>
+                      <div className="dish__foot">
+                        <span className="dish__price">{fmt(item.price)}</span>
+                        {q > 0 ? (
+                          <div className="stepper stepper--sm">
+                            <button type="button" className="stepper__btn" onClick={() => removeFromCart(item.id)} aria-label={`Убрать порцию: ${item.name}`}><MinusIcon size={14} weight="bold" /></button>
+                            <span className="stepper__value">{q}</span>
+                            <button type="button" className="stepper__btn" onClick={() => addToCart(item.id)} aria-label={`Добавить порцию: ${item.name}`}><PlusIcon size={14} weight="bold" /></button>
+                          </div>
+                        ) : (
+                          <button type="button" className="btn btn--icon btn--sm" onClick={() => addToCart(item.id)} aria-label={`Добавить: ${item.name}`}>
+                            <PlusIcon size={16} weight="bold" />
+                          </button>
+                        )}
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+          </section>
 
-          {/* RIGHT (desktop ≥1024px) / hidden on tablet & mobile — uses CartPanel below */}
-          <div className="cart-sidebar-desktop" style={{ ...S.card, position: 'sticky', top: 76, border: '1px solid #2a2a2a' }}>
-            <CartPanel
-              cartItems={cartItems} cartQty={cartQty} cartTotal={cartTotal}
-              tableNumber={tableNumber} setTableNumber={setTableNumber}
-              addToCart={addToCart} removeFromCart={removeFromCart}
-              submitOrder={submitOrder} submitting={submitting}
-            />
-          </div>
+          <aside className="card cart" aria-label="Текущий заказ">
+            <div className="cart__inner">
+              <div className="cart__head">
+                <h2 className="cart__title">Заказ</h2>
+                {cartQty > 0 && <span className="count">{cartQty}</span>}
+              </div>
+              <CartPanel {...panelProps} idPrefix="cart-desktop" />
+            </div>
+          </aside>
         </div>
       )}
 
-      {tab === 'orders' && <ActiveOrders orders={orders} onPayOrder={setPayOrder} />}
+      {tab === 'orders' && <ActiveOrders orders={orders} onPay={setPayOrder} />}
 
-      {/* MOBILE: bottom sticky cart bar */}
       {tab === 'new' && (
-        <div className="show-mobile mobile-cart-bar anim-fade-up" style={{
-          position: 'fixed',
-          bottom: 0, left: 0, right: 0,
-          background: 'linear-gradient(180deg, #0a0a0a, #050505)',
-          borderTop: '1px solid #1e1e1e',
-          padding: '12px 16px calc(12px + env(safe-area-inset-bottom))',
-          zIndex: 50,
-          boxShadow: '0 -8px 24px rgba(0,0,0,0.6)',
-          alignItems: 'center',
-          gap: 12,
-        }}>
-          <button
-            onClick={() => setMobileCart(true)}
-            style={{
-              flex: 1, background: '#f59e0b', color: '#000', border: 'none',
-              borderRadius: 10, padding: '12px 16px', fontWeight: 700, fontSize: 14,
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
-              cursor: cartItems.length === 0 ? 'default' : 'pointer',
-              opacity: cartItems.length === 0 ? 0.5 : 1,
-            }}
-            disabled={cartItems.length === 0}
-          >
-            <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              🛒 Корзина {cartQty > 0 && <span className="anim-pop" key={cartQty} style={{ background: '#000', color: '#f59e0b', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>{cartQty}</span>}
-            </span>
-            <span>{fmt(cartTotal)}</span>
-          </button>
-        </div>
+        <>
+          <div className="cart-bar-spacer" aria-hidden />
+          <div className="cart-bar">
+            <button type="button" className="btn btn--primary btn--lg btn--block" onClick={() => setCartOpen(true)}>
+              <span className="row"><ShoppingCartSimpleIcon size={20} aria-hidden /> Заказ{cartQty > 0 && <span className="count" style={{ background: 'var(--on-primary)', color: 'var(--primary)' }}>{cartQty}</span>}</span>
+              <span className="num">{fmt(cartTotal)}</span>
+            </button>
+          </div>
+        </>
       )}
 
-      {/* MOBILE: cart sheet */}
-      {mobileCart && (
-        <Modal title="Заказ" onClose={() => setMobileCart(false)} maxWidth={500}>
-          <CartPanel
-            cartItems={cartItems} cartQty={cartQty} cartTotal={cartTotal}
-            tableNumber={tableNumber} setTableNumber={setTableNumber}
-            addToCart={addToCart} removeFromCart={removeFromCart}
-            submitOrder={submitOrder} submitting={submitting}
-          />
+      {cartOpen && (
+        <Modal title="Заказ" onClose={() => setCartOpen(false)} width={480} busy={submitting}>
+          <div style={{ margin: 'calc(var(--sp-5) * -1)' }}>
+            <CartPanel {...panelProps} idPrefix="cart-sheet" />
+          </div>
         </Modal>
       )}
 
-      {payOrder && (
-        <PaymentModal order={payOrder} onClose={() => setPayOrder(null)} onDone={handlePayDone} />
-      )}
-
-      {/* Add bottom padding on mobile to clear sticky cart */}
-      {tab === 'new' && <div className="show-mobile show-mobile-spacer" style={{ height: 80 }} />}
+      {payOrder && <PaymentModal order={payOrder} onClose={() => setPayOrder(null)} onPaid={handlePaid} />}
     </div>
-  );
-}
-
-// ── Cart panel (shared between desktop sidebar and mobile sheet) ──────────────
-interface CartPanelProps {
-  cartItems: Array<{ item: MenuItem; qty: number }>;
-  cartQty: number;
-  cartTotal: number;
-  tableNumber: string;
-  setTableNumber: (v: string) => void;
-  addToCart: (id: number) => void;
-  removeFromCart: (id: number) => void;
-  submitOrder: () => void;
-  submitting: boolean;
-}
-function CartPanel({ cartItems, cartQty, cartTotal, tableNumber, setTableNumber, addToCart, removeFromCart, submitOrder, submitting }: CartPanelProps) {
-  return (
-    <>
-      <h3 style={{ margin: '0 0 18px', fontFamily: "'Playfair Display', serif", color: '#e5e7eb', fontSize: 18, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        Заказ
-        {cartQty > 0 && <span className="anim-pop" key={cartQty} style={{ fontSize: 12, color: '#f59e0b', background: '#451a03', borderRadius: 20, padding: '3px 12px', fontWeight: 600 }}>{cartQty} блюд</span>}
-      </h3>
-
-      <div style={{ marginBottom: 18 }}>
-        <label style={S.label}>Номер стола</label>
-        <input style={S.input} type="number" value={tableNumber} onChange={(e) => { setTableNumber(e.target.value); localStorage.setItem('resto_table', e.target.value); }} placeholder="1 — 50" min="1" max="50" />
-      </div>
-
-      {cartItems.length === 0 ? (
-        <div className="anim-fade-up" style={{ textAlign: 'center', padding: '36px 0', color: '#2e2e2e' }}>
-          <div className="anim-float" style={{ fontSize: 36, marginBottom: 10 }}>🍽</div>
-          <div style={{ fontSize: 13 }}>Выберите блюда из меню</div>
-        </div>
-      ) : (
-        <div style={{ maxHeight: 320, overflowY: 'auto', marginBottom: 16 }}>
-          {cartItems.map(({ item, qty }) => (
-            <div key={item.id} className="anim-fade-up" style={{ display: 'flex', alignItems: 'center', gap: 10, paddingBottom: 12, marginBottom: 12, borderBottom: '1px solid #1a1a1a' }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, color: '#d1d5db', fontWeight: 500, marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</div>
-                <div style={{ fontSize: 12, color: '#4b5563' }}>{fmt(item.price)} / шт</div>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                <button onClick={() => removeFromCart(item.id)} style={{ background: '#1e1e1e', border: '1px solid #2a2a2a', color: '#9ca3af', width: 28, height: 28, borderRadius: '50%', cursor: 'pointer', fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>−</button>
-                <span className="anim-pop" key={qty} style={{ fontSize: 14, fontWeight: 700, color: '#f59e0b', minWidth: 18, textAlign: 'center' }}>{qty}</span>
-                <button onClick={() => addToCart(item.id)} style={{ background: '#1e1e1e', border: '1px solid #2a2a2a', color: '#9ca3af', width: 28, height: 28, borderRadius: '50%', cursor: 'pointer', fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>+</button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div style={{ borderTop: '1px solid #1e1e1e', paddingTop: 16 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-          <span style={{ color: '#6b7280', fontSize: 13 }}>Итого</span>
-          <span className="anim-pop" key={cartTotal} style={{ fontWeight: 700, color: '#f59e0b', fontSize: 22, fontFamily: "'Playfair Display', serif" }}>{fmt(cartTotal)}</span>
-        </div>
-        <button
-          style={{ ...S.btn(), width: '100%', padding: '13px 0', fontSize: 14, opacity: !tableNumber || cartItems.length === 0 ? 0.4 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}
-          onClick={submitOrder} disabled={!tableNumber || cartItems.length === 0 || submitting}
-        >
-          {submitting && <Spinner size={16} color="#000" />}
-          {submitting ? 'Отправка...' : 'Отправить на кухню →'}
-        </button>
-      </div>
-    </>
   );
 }

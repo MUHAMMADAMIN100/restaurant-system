@@ -57,6 +57,8 @@ npm run seed
 | Waiter  | waiter@resto.com   | waiter  |
 | Chef    | chef@resto.com     | chef    |
 
+Локально их можно не вводить: на странице входа есть кнопки «Демо-доступ».
+
 ---
 
 ## 3. Frontend (React + Vite)
@@ -77,26 +79,26 @@ npm run dev
 
 ## API Endpoints
 
-| Метод  | URL                        | Описание              | Роль    |
-|--------|----------------------------|-----------------------|---------|
-| POST   | /auth/login                | Вход                  | All     |
-| GET    | /auth/me                   | Текущий пользователь  | Auth    |
-| GET    | /categories                | Список категорий      | Auth    |
-| POST   | /categories                | Создать категорию     | Admin   |
-| PATCH  | /categories/:id            | Обновить              | Admin   |
-| DELETE | /categories/:id            | Удалить               | Admin   |
-| GET    | /menu                      | Список блюд           | Auth    |
-| POST   | /menu                      | Добавить блюдо        | Admin   |
-| PATCH  | /menu/:id                  | Обновить блюдо        | Admin   |
-| DELETE | /menu/:id                  | Удалить блюдо         | Admin   |
-| GET    | /orders                    | Все заказы            | Auth    |
-| POST   | /orders                    | Создать заказ         | Waiter  |
-| PATCH  | /orders/:id/status         | Изменить статус       | Chef    |
-| GET    | /payments                  | Платежи               | Admin   |
-| GET    | /payments/analytics        | Аналитика             | Admin   |
-| POST   | /payments                  | Принять оплату        | Waiter  |
+Все пути начинаются с `/api` (например, `POST /api/auth/login`). Swagger: `/docs`.
 
----
+| Метод  | URL                        | Описание                                                    | Роль           |
+|--------|----------------------------|-------------------------------------------------------------|----------------|
+| POST   | /auth/login                | Вход                                                        | All            |
+| GET    | /auth/me                   | Текущий пользователь                                        | Auth           |
+| GET    | /categories                | Список категорий                                            | Auth           |
+| POST   | /categories                | Создать категорию                                           | Admin          |
+| PATCH  | /categories/:id            | Переименовать                                               | Admin          |
+| DELETE | /categories/:id            | Удалить (409, если в категории есть блюда)                  | Admin          |
+| GET    | /menu                      | Список блюд (без архивных)                                  | Auth           |
+| POST   | /menu                      | Добавить блюдо                                              | Admin          |
+| PATCH  | /menu/:id                  | Обновить блюдо                                              | Admin          |
+| DELETE | /menu/:id                  | Убрать блюдо в архив (история заказов сохраняется)          | Admin          |
+| GET    | /orders                    | Все заказы (`?status=PENDING\|COOKING\|READY\|CLOSED`)     | Auth           |
+| POST   | /orders                    | Создать заказ; цена блюда фиксируется в заказе              | Admin, Waiter  |
+| PATCH  | /orders/:id/status         | `PENDING → COOKING → READY` (закрыть можно только оплатой) | Admin, Chef    |
+| GET    | /payments                  | Платежи                                                     | Admin, Waiter  |
+| GET    | /payments/analytics        | Аналитика (`?period=today\|week\|month\|all`)              | Admin          |
+| POST   | /payments                  | Принять оплату `{ orderId, type }` — сумму считает сервер  | Admin, Waiter  |
 
 ## WebSocket (Socket.io)
 
@@ -116,12 +118,6 @@ Namespace: `/orders`
 - **Backend** → Railway / Render (укажи переменные из `.env`)
 - **Database** → Railway PostgreSQL или Supabase
 
-### Для деплоя — обнови `frontend/src/api/client.js`:
-```js
-const BASE = import.meta.env.VITE_API_URL || '/api';
-```
-
-И добавь `.env` файл во frontend:
-```
-VITE_API_URL=https://твой-backend.railway.app
-```
+### Переменные окружения
+- Backend: `DATABASE_URL` (или `DB_*`), `JWT_SECRET` — **обязателен**, без него сервер не запустится; `FRONTEND_URL` для CORS.
+- Frontend (Vercel): `VITE_API_URL` и `VITE_WS_URL` — адрес backend. Кнопки демо-входа видны только при локальной разработке (`npm run dev`).

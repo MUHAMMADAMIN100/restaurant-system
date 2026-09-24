@@ -1,126 +1,124 @@
 import { useState, useEffect, Component, type ReactNode } from 'react';
-import { api } from './api/client';
+import { ArrowClockwiseIcon, SignOutIcon, WarningCircleIcon } from '@phosphor-icons/react';
+import { api, tokenStore, SESSION_EXPIRED_EVENT } from './api/client';
 import type { User } from './api/client';
 import { disconnectSocket } from './hooks/useSocket';
 import LoginPage from './components/LoginPage';
 import AdminView from './components/AdminView';
 import WaiterView from './components/WaiterView';
 import ChefView from './components/ChefView';
-import { S } from './utils/styles';
+import { Brand, Spinner, ToastProvider, UserChip } from './components/UI';
 
-interface ErrorBoundaryState { hasError: boolean; error: Error | null; }
-interface ErrorBoundaryProps { children: ReactNode; }
-
-class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  constructor(props: ErrorBoundaryProps) {
-    super(props);
-    this.state = { hasError: false, error: null };
-  }
-  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
-    return { hasError: true, error };
-  }
+// ── Error boundary ───────────────────────────────────────────────────────────
+interface EBState { error: Error | null; }
+class ErrorBoundary extends Component<{ children: ReactNode }, EBState> {
+  state: EBState = { error: null };
+  static getDerivedStateFromError(error: Error): EBState { return { error }; }
   render() {
-    if (this.state.hasError) {
-      return (
-        <div className="anim-fade" style={{ minHeight: '100vh', background: '#080808', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-          <div style={{ textAlign: 'center', maxWidth: 480 }}>
-            <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 28, color: '#f59e0b', marginBottom: 16 }}>RestaurantOS</div>
-            <div style={{ color: '#ef4444', fontSize: 16, marginBottom: 12, fontWeight: 600 }}>Что-то пошло не так</div>
-            <div style={{ color: '#4b5563', fontSize: 13, marginBottom: 24 }}>{this.state.error?.message}</div>
-            <button style={S.btn()} onClick={() => window.location.reload()}>Перезагрузить</button>
+    if (!this.state.error) return this.props.children;
+    return (
+      <div className="login">
+        <div className="login__panel" role="alert">
+          <div className="empty">
+            <div className="empty__icon"><WarningCircleIcon size={24} /></div>
+            <div className="empty__title">Что-то пошло не так</div>
+            <div className="empty__text">Страница столкнулась с ошибкой. Перезагрузите её — данные на сервере не пострадали.</div>
+            <button className="btn btn--primary" onClick={() => window.location.reload()}>
+              <ArrowClockwiseIcon size={16} /> Перезагрузить
+            </button>
           </div>
         </div>
-      );
-    }
-    return this.props.children;
+      </div>
+    );
   }
 }
 
-const ROLE_ICON  = { admin: '👑', waiter: '🍽', chef: '👨‍🍳' };
-const ROLE_LABEL = { admin: 'Administrator', waiter: 'Waiter', chef: 'Chef' };
-
-interface NavbarProps { user: User; onLogout: () => void; }
-function Navbar({ user, onLogout }: NavbarProps) {
+// ── Top bar (waiter & kitchen) ───────────────────────────────────────────────
+function Topbar({ user, context, onLogout }: { user: User; context: string; onLogout: () => void }) {
   return (
-    <div className="anim-fade-down" style={{
-      background: 'rgba(13, 13, 13, 0.85)',
-      backdropFilter: 'blur(10px)',
-      WebkitBackdropFilter: 'blur(10px)',
-      borderBottom: '1px solid #1a1a1a',
-      padding: '0 16px',
-      display: 'flex', alignItems: 'center',
-      justifyContent: 'space-between',
-      height: 60,
-      position: 'sticky', top: 0, zIndex: 100,
-      gap: 12,
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
-        <span style={{ fontFamily: "'Playfair Display', serif", fontSize: 20, color: '#f59e0b', fontWeight: 700, letterSpacing: '-0.5px', whiteSpace: 'nowrap' }}>
-          Restaurant<span style={{ color: '#4b5563' }}>OS</span>
-        </span>
-        <span className="hide-mobile" style={{ width: 1, height: 22, background: '#1e1e1e' }} />
-        <span className="hide-mobile" style={{ fontSize: 11, color: '#3a3a3a', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-          {user.role === 'admin' ? 'Управление' : user.role === 'waiter' ? 'Зал' : 'Кухня'}
-        </span>
-      </div>
-
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 12px', background: '#141414', borderRadius: 8, border: '1px solid #222' }}>
-          <span style={{ fontSize: 16 }}>{ROLE_ICON[user.role]}</span>
-          <div className="hide-mobile">
-            <div style={{ fontSize: 12, color: '#e5e7eb', fontWeight: 600, lineHeight: 1.2 }}>{user.name}</div>
-            <div style={{ fontSize: 9, color: '#4b5563', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{ROLE_LABEL[user.role]}</div>
-          </div>
-        </div>
-        <button style={{ ...S.btnGhost, padding: '7px 12px' }} onClick={onLogout}>Выйти</button>
-      </div>
-    </div>
+    <header className="topbar">
+      <Brand />
+      <span className="topbar__context">{context}</span>
+      <span className="topbar__spacer" />
+      <UserChip user={user} />
+      <span className="topbar__divider" aria-hidden="true" />
+      <button className="btn btn--ghost btn--sm" onClick={onLogout}>
+        <SignOutIcon size={18} aria-hidden /> <span>Выйти</span>
+      </button>
+    </header>
   );
 }
 
+// ── App ──────────────────────────────────────────────────────────────────────
 export default function App() {
   const [user, setUser]         = useState<User | null>(null);
   const [checking, setChecking] = useState(true);
+  const [notice, setNotice]     = useState<string | null>(null);
 
   useEffect(() => {
-    const token = localStorage.getItem('resto_token');
-    if (!token) { setChecking(false); return; }
+    if (!tokenStore.get()) { setChecking(false); return; }
     api.me()
       .then(setUser)
-      .catch(() => localStorage.removeItem('resto_token'))
+      .catch(() => tokenStore.clear())
       .finally(() => setChecking(false));
   }, []);
 
-  const handleLogin = (u: User) => setUser(u);
+  // Server rejected the token mid-session → back to login with an explanation.
+  useEffect(() => {
+    const onExpired = () => {
+      disconnectSocket();
+      setUser((u) => {
+        if (u) setNotice('Сессия истекла. Войдите снова.');
+        return null;
+      });
+    };
+    window.addEventListener(SESSION_EXPIRED_EVENT, onExpired);
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, onExpired);
+  }, []);
+
+  // Kitchen display uses the dark theme; everything else is light.
+  useEffect(() => {
+    const kitchen = user?.role === 'chef';
+    document.documentElement.dataset.theme = kitchen ? 'kitchen' : 'light';
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', kitchen ? '#18181B' : '#FFFFFF');
+  }, [user]);
+
+  const handleLogin = (u: User) => { setNotice(null); setUser(u); };
   const handleLogout = () => {
-    localStorage.removeItem('resto_token');
+    tokenStore.clear();
     disconnectSocket();
     setUser(null);
   };
 
   if (checking) {
     return (
-      <div className="anim-fade" style={{ minHeight: '100vh', background: '#080808', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ textAlign: 'center' }}>
-          <div className="shimmer-text" style={{ fontFamily: "'Playfair Display', serif", fontSize: 32, marginBottom: 22, fontWeight: 700 }}>RestaurantOS</div>
-          <div style={{ border: '2px solid #1e1e1e', borderTopColor: '#f59e0b', borderRadius: '50%', width: 28, height: 28, animation: 'spin 0.7s linear infinite', margin: '0 auto' }} />
+      <div className="login" aria-busy="true">
+        <div style={{ display: 'grid', justifyItems: 'center', gap: 20 }}>
+          <Brand />
+          <Spinner size={20} label="Загрузка" />
         </div>
       </div>
     );
   }
 
-  if (!user) return <LoginPage onLogin={handleLogin} />;
-
   return (
-    <ErrorBoundary>
-      <div style={{ fontFamily: "'DM Sans', sans-serif", minHeight: '100vh', background: '#080808', color: '#e5e7eb' }}>
-        <Navbar user={user} onLogout={handleLogout} />
-        <div className="container-app">
-          {user.role === 'admin'  && <AdminView />}
-          {user.role === 'waiter' && <WaiterView />}
-          {user.role === 'chef'   && <ChefView />}
-        </div>
-      </div>
-    </ErrorBoundary>
+    <ToastProvider>
+      {!user ? (
+        <LoginPage onLogin={handleLogin} notice={notice} />
+      ) : (
+        <ErrorBoundary>
+          <a href="#main" className="skip-link">Перейти к содержимому</a>
+          {user.role === 'admin' && <AdminView user={user} onLogout={handleLogout} />}
+          {user.role !== 'admin' && (
+            <>
+              <Topbar user={user} context={user.role === 'waiter' ? 'Зал' : 'Кухня'} onLogout={handleLogout} />
+              <main id="main" className="page" tabIndex={-1}>
+                {user.role === 'waiter' ? <WaiterView /> : <ChefView />}
+              </main>
+            </>
+          )}
+        </ErrorBoundary>
+      )}
+    </ToastProvider>
   );
 }

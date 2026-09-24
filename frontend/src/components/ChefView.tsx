@@ -1,184 +1,230 @@
-import { useState, useEffect, useCallback, memo } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import {
+  SpeakerHighIcon, SpeakerSlashIcon, ArrowClockwiseIcon, ClockIcon, WarningIcon,
+  PlayIcon, CheckIcon, CallBellIcon, WarningCircleIcon,
+} from '@phosphor-icons/react';
 import { api } from '../api/client';
 import type { Order, OrderStatus } from '../api/client';
-import { useOrderSocket } from '../hooks/useSocket';
-import { Spinner, useToast, Skeleton } from './UI';
-import { S, fmt, timeAgo, STATUS_LABEL, STATUS_COLOR, STATUS_BG, calcTotal } from '../utils/styles';
+import { useOrderSocket, useSocketStatus } from '../hooks/useSocket';
+import { useNow } from '../hooks/useNow';
+import { Spinner, useToast, Skeleton, EmptyState } from './UI';
+import { elapsedLabel, minutesSince, pluralRu, upsertById } from '../utils/format';
 
-type AdvancableStatus = 'PENDING' | 'COOKING';
-const NEXT: Record<AdvancableStatus, OrderStatus> = { PENDING: 'COOKING', COOKING: 'READY' };
-const BTN_LABEL: Record<AdvancableStatus, string> = { PENDING: '▶ Начать готовить', COOKING: '✓ Готово!' };
-const BTN_COLOR: Record<AdvancableStatus, string> = { PENDING: '#f59e0b', COOKING: '#3b82f6' };
-const BTN_FG:    Record<AdvancableStatus, string> = { PENDING: '#000', COOKING: '#fff' };
+type KitchenStatus = Extract<OrderStatus, 'PENDING' | 'COOKING' | 'READY'>;
 
-interface OrderCardProps { order: Order; onAdvance: (o: Order) => void; advancing: boolean; }
-const OrderCard = memo(function OrderCard({ order, onAdvance, advancing }: OrderCardProps) {
-  const elapsed = Math.floor((Date.now() - new Date(order.createdAt).getTime()) / 60000);
-  const isLate  = order.status === 'PENDING' && elapsed > 5;
+const COLUMNS: { status: KitchenStatus; title: string }[] = [
+  { status: 'PENDING', title: 'Новые' },
+  { status: 'COOKING', title: 'Готовятся' },
+  { status: 'READY',   title: 'Готовы к выдаче' },
+];
+
+const NEXT: Partial<Record<OrderStatus, OrderStatus>> = { PENDING: 'COOKING', COOKING: 'READY' };
+/** Minutes after which an order is flagged as delayed. */
+const LATE_AFTER: Partial<Record<OrderStatus, number>> = { PENDING: 5, COOKING: 20 };
+const SOUND_KEY = 'resto_kds_sound';
+
+// ── New-order chime (Web Audio, no asset) ─────────────────────────────────────
+function useChime() {
+  const ctxRef = useRef<AudioContext | null>(null);
+
+  const ensure = useCallback(() => {
+    try {
+      if (!ctxRef.current) {
+        const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+        if (!Ctx) return null;
+        ctxRef.current = new Ctx();
+      }
+      if (ctxRef.current.state === 'suspended') ctxRef.current.resume().catch(() => {});
+      return ctxRef.current;
+    } catch { return null; }
+  }, []);
+
+  // Browsers only allow audio after a user gesture — unlock on the first tap anywhere.
+  useEffect(() => {
+    const unlock = () => ensure();
+    window.addEventListener('pointerdown', unlock, { once: true });
+    window.addEventListener('keydown', unlock, { once: true });
+    return () => { window.removeEventListener('pointerdown', unlock); window.removeEventListener('keydown', unlock); };
+  }, [ensure]);
+
+  return useCallback(() => {
+    const ctx = ensure();
+    if (!ctx) return;
+    const t0 = ctx.currentTime;
+    [[880, 0], [1318.5, 0.16]].forEach(([freq, delay]) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, t0 + delay);
+      gain.gain.exponentialRampToValueAtTime(0.25, t0 + delay + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + delay + 0.45);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(t0 + delay);
+      osc.stop(t0 + delay + 0.5);
+    });
+  }, [ensure]);
+}
+
+// ── Order card ────────────────────────────────────────────────────────────────
+interface CardProps { order: Order; now: number; busy: boolean; onAdvance: (o: Order) => void; }
+function KitchenCard({ order, now, busy, onAdvance }: CardProps) {
+  const mins = minutesSince(order.createdAt, now);
+  const lateAfter = LATE_AFTER[order.status];
+  const late = lateAfter !== undefined && mins >= lateAfter;
 
   return (
-    <div className="anim-fade-up card-hover" style={{
-      background: '#141414',
-      border: `1px solid ${STATUS_COLOR[order.status]}22`,
-      borderLeft: `4px solid ${STATUS_COLOR[order.status]}`,
-      borderRadius: 12, padding: 16,
-      transition: 'transform 0.25s var(--ease-out), border-color 0.3s, box-shadow 0.25s',
-    }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12, gap: 10 }}>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 19, color: '#e5e7eb' }}>
-            Стол #{order.tableNumber}
-          </div>
-          <div className={isLate ? 'anim-pulse' : ''} style={{ fontSize: 11, color: isLate ? '#ef4444' : '#4b5563', marginTop: 4, fontWeight: isLate ? 600 : 400 }}>
-            {isLate ? '⚠ ' : ''}{timeAgo(order.createdAt)}
-          </div>
+    <article className={`kds-card ${late ? 'is-late' : ''}`} data-status={order.status} aria-label={`Стол ${order.tableNumber}, заказ ${order.id}`}>
+      <div className="kds-card__head">
+        <div>
+          <div className="kds-card__table">Стол {order.tableNumber}</div>
+          <div className="kds-card__id">Заказ № {order.id}</div>
         </div>
-        <span style={{ fontSize: 12, color: STATUS_COLOR[order.status], background: STATUS_BG[order.status], borderRadius: 8, padding: '4px 10px', fontWeight: 700, flexShrink: 0 }}>
-          #{order.id < 0 ? '...' : order.id}
+        <span className={`kds-timer ${late ? 'is-late' : ''}`} title="Время с момента заказа">
+          {late ? <WarningIcon size={18} weight="bold" aria-hidden /> : <ClockIcon size={18} aria-hidden />}
+          {elapsedLabel(order.createdAt, now)}
+          {late && <span className="sr-only">, задерживается</span>}
         </span>
       </div>
 
-      <div style={{ borderTop: '1px solid #1e1e1e', borderBottom: '1px solid #1e1e1e', padding: '12px 0', marginBottom: 12 }}>
+      <ul className="kds-items">
         {(order.items || []).map((it) => (
-          <div key={it.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, gap: 10 }}>
-            <span style={{ color: '#d1d5db', fontSize: 14, fontWeight: 500, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.menuItem?.name || '?'}</span>
-            <span style={{ color: STATUS_COLOR[order.status], fontWeight: 800, fontSize: 17, fontFamily: "'Playfair Display', serif", flexShrink: 0 }}>×{it.quantity}</span>
-          </div>
+          <li key={it.id} className="kds-item">
+            <span className="kds-item__qty">{it.quantity}×</span>
+            <span className="kds-item__name">{it.menuItem?.name ?? 'Блюдо'}</span>
+          </li>
         ))}
-      </div>
+      </ul>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-        <span style={{ fontSize: 12, color: '#4b5563' }}>Сумма</span>
-        <span style={{ fontSize: 14, color: '#6b7280', fontWeight: 600 }}>{fmt(calcTotal(order))}</span>
-      </div>
-
-      {order.status !== 'READY' ? (
-        <button
-          style={{
-            ...S.btn(BTN_COLOR[order.status as AdvancableStatus], BTN_FG[order.status as AdvancableStatus]),
-            width: '100%', padding: '11px 0', fontSize: 13,
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-            opacity: advancing ? 0.7 : 1,
-          }}
-          onClick={() => onAdvance(order)}
-          disabled={advancing}
-          aria-label={BTN_LABEL[order.status as AdvancableStatus]}
-        >
-          {advancing ? <Spinner size={14} color={BTN_FG[order.status as AdvancableStatus]} /> : null}
-          {advancing ? 'Обновление...' : BTN_LABEL[order.status as AdvancableStatus]}
+      {order.status === 'PENDING' && (
+        <button type="button" className="btn btn--lg btn--block btn--start" onClick={() => onAdvance(order)} disabled={busy}>
+          {busy ? <Spinner /> : <PlayIcon size={18} weight="fill" aria-hidden />} Начать готовить
         </button>
-      ) : (
-        <div className="anim-pulse-glow" style={{ textAlign: 'center', fontSize: 13, color: '#10b981', padding: 11, background: '#064e3b', borderRadius: 8, fontWeight: 600, letterSpacing: '0.03em' }}>
-          ✓ Ожидает подачи на стол
-        </div>
       )}
-    </div>
+      {order.status === 'COOKING' && (
+        <button type="button" className="btn btn--lg btn--block btn--done" onClick={() => onAdvance(order)} disabled={busy}>
+          {busy ? <Spinner /> : <CheckIcon size={18} weight="bold" aria-hidden />} Готово
+        </button>
+      )}
+      {order.status === 'READY' && (
+        <div className="kds-waiting"><CallBellIcon size={18} aria-hidden /> Ждёт официанта</div>
+      )}
+    </article>
   );
-});
+}
 
+// ── ChefView (root) ───────────────────────────────────────────────────────────
 export default function ChefView() {
   const [orders, setOrders]       = useState<Order[]>([]);
   const [loading, setLoading]     = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
   const [advancing, setAdvancing] = useState<number | null>(null);
-  const { show, node } = useToast();
+  const [soundOn, setSoundOn]     = useState(() => { try { return localStorage.getItem(SOUND_KEY) !== 'off'; } catch { return true; } });
+  const toast = useToast();
+  const now = useNow(15000);
+  const chime = useChime();
+  const soundRef = useRef(soundOn);
+  soundRef.current = soundOn;
 
   const loadOrders = useCallback(async () => {
+    setLoadError('');
     try {
-      const data = await api.getOrders();
-      setOrders(data);
-    } finally { setLoading(false); }
+      setOrders(await api.getOrders());
+    } catch (e) {
+      setLoadError((e as Error).message);
+    } finally { setLoading(false); setRefreshing(false); }
   }, []);
 
   useEffect(() => { loadOrders(); }, [loadOrders]);
+  const online = useSocketStatus(loadOrders);
+
+  useEffect(() => { try { localStorage.setItem(SOUND_KEY, soundOn ? 'on' : 'off'); } catch { /* ignore */ } }, [soundOn]);
 
   useOrderSocket({
     onNew: (o) => {
-      setOrders((p) => p.find((x) => x.id === o.id) ? p : [o, ...p]);
-      show('🔔 Новый заказ!');
+      setOrders((p) => upsertById(p, o, 'start'));
+      if (soundRef.current) chime();
+      toast(`Новый заказ: стол ${o.tableNumber}`);
     },
-    onStatus: (o) => setOrders((p) => p.map((x) => x.id === o.id ? o : x)),
-    onClosed: (o) => setOrders((p) => p.map((x) => x.id === o.id ? o : x)),
+    onStatus: (o) => setOrders((p) => upsertById(p, o)),
+    onClosed: (o) => setOrders((p) => upsertById(p, o)),
   });
 
   const advance = async (order: Order) => {
-    const next = NEXT[order.status as AdvancableStatus];
+    const next = NEXT[order.status];
     if (!next) return;
     setAdvancing(order.id);
-    // Optimistic status update
-    const prev = order.status;
-    setOrders((p) => p.map((x) => x.id === order.id ? { ...x, status: next } : x));
     try {
-      await api.updateStatus(order.id, next);
+      const updated = await api.updateStatus(order.id, next);
+      setOrders((p) => upsertById(p, updated));
     } catch (e) {
-      setOrders((p) => p.map((x) => x.id === order.id ? { ...x, status: prev } : x));
-      show((e as Error).message, 'error');
-    }
-    finally { setAdvancing(null); }
+      toast((e as Error).message, 'error');
+      loadOrders();
+    } finally { setAdvancing(null); }
   };
 
   if (loading) {
     return (
-      <div className="anim-fade kanban-3">
+      <div className="kds" aria-busy="true">
         {[0, 1, 2].map((i) => (
-          <div key={i} style={{ display: 'grid', gap: 12 }}>
-            <Skeleton height={42} radius={10} />
-            <Skeleton height={180} radius={12} />
-            <Skeleton height={180} radius={12} />
-          </div>
+          <div key={i} className="kds-col"><Skeleton height={40} /><Skeleton height={220} radius={12} /><Skeleton height={220} radius={12} /></div>
         ))}
       </div>
     );
   }
 
-  const active = orders.filter((o) => ['PENDING', 'COOKING', 'READY'].includes(o.status));
+  if (loadError && orders.length === 0) {
+    return (
+      <div className="card">
+        <EmptyState
+          icon={<WarningCircleIcon size={24} />} title="Не удалось загрузить заказы" text={loadError}
+          action={<button className="btn btn--primary" onClick={() => { setLoading(true); loadOrders(); }}><ArrowClockwiseIcon size={16} /> Повторить</button>}
+        />
+      </div>
+    );
+  }
+
+  const active = orders.filter((o) => o.status !== 'CLOSED');
+  // Oldest first: the kitchen works in order of arrival.
+  const byAge = (a: Order, b: Order) => +new Date(a.createdAt) - +new Date(b.createdAt);
 
   return (
     <div>
-      {node}
-      <div className="flex-col-sm-row anim-fade-down" style={{ justifyContent: 'space-between', marginBottom: 24 }}>
+      <div className="kds-header">
         <div>
-          <h2 style={{ margin: 0, fontFamily: "'Playfair Display', serif", fontSize: 24, color: '#e5e7eb' }}>Кухонный дисплей</h2>
-          <p style={{ margin: '6px 0 0', fontSize: 13, color: '#4b5563' }}>
-            Активных: <strong style={{ color: '#9ca3af' }}>{active.length}</strong> · Real-time
-            <span className="dot-online" style={{ marginLeft: 10, verticalAlign: 'middle' }} />
+          <h1 className="page-title">Кухня</h1>
+          <p className="page-subtitle">
+            {active.length === 0 ? 'Активных заказов нет' : `${active.length} ${pluralRu(active.length, ['активный заказ', 'активных заказа', 'активных заказов'])}`}
           </p>
         </div>
-        <button style={S.btnGhost} onClick={loadOrders}>↻ Обновить</button>
+        <div className="toolbar">
+          <span className={`conn ${online ? '' : 'is-offline'}`} role="status">
+            <span className="conn__dot" aria-hidden /> {online ? 'На связи' : 'Нет связи — переподключаемся'}
+          </span>
+          <button type="button" className="btn" onClick={() => setSoundOn((v) => !v)} aria-pressed={soundOn}>
+            {soundOn ? <SpeakerHighIcon size={18} aria-hidden /> : <SpeakerSlashIcon size={18} aria-hidden />}
+            {soundOn ? 'Звук включён' : 'Звук выключен'}
+          </button>
+          <button type="button" className="btn btn--icon" onClick={() => { setRefreshing(true); loadOrders(); }} aria-label="Обновить" disabled={refreshing}>
+            {refreshing ? <Spinner /> : <ArrowClockwiseIcon size={18} />}
+          </button>
+        </div>
       </div>
 
-      <div className="kanban-3">
-        {(['PENDING', 'COOKING', 'READY'] as const).map((status) => {
-          const col = active.filter((o) => o.status === status);
+      <div className="kds">
+        {COLUMNS.map(({ status, title }) => {
+          const col = active.filter((o) => o.status === status).sort(byAge);
           return (
-            <div key={status} className="anim-fade-up">
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14,
-                padding: '10px 16px', background: STATUS_BG[status],
-                borderRadius: 10, border: `1px solid ${STATUS_COLOR[status]}33`,
-              }}>
-                <div style={{ width: 8, height: 8, borderRadius: '50%', background: STATUS_COLOR[status] }} />
-                <span style={{ fontWeight: 700, color: STATUS_COLOR[status], fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-                  {STATUS_LABEL[status]}
-                </span>
-                <span className="anim-pop" key={col.length} style={{ marginLeft: 'auto', background: 'rgba(0,0,0,0.3)', color: STATUS_COLOR[status], borderRadius: 20, padding: '1px 10px', fontSize: 13, fontWeight: 700 }}>{col.length}</span>
-              </div>
-
-              <div className="stagger" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {col.map((order) => (
-                  <OrderCard
-                    key={order.id}
-                    order={order}
-                    onAdvance={advance}
-                    advancing={advancing === order.id}
-                  />
-                ))}
-                {col.length === 0 && (
-                  <div className="anim-fade" style={{ border: '1px dashed #222', borderRadius: 12, padding: '36px 16px', textAlign: 'center', color: '#2a2a2a', fontSize: 13 }}>
-                    Нет заказов
-                  </div>
-                )}
-              </div>
-            </div>
+            <section key={status} className="kds-col" aria-label={title}>
+              <h2 className="kds-col__head" data-status={status}>
+                {title}
+                <span className="count">{col.length}</span>
+              </h2>
+              {col.length === 0
+                ? <div className="kds-empty">Пусто</div>
+                : col.map((o) => <KitchenCard key={o.id} order={o} now={now} busy={advancing === o.id} onAdvance={advance} />)}
+            </section>
           );
         })}
       </div>

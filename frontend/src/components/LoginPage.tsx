@@ -1,92 +1,135 @@
-import { useState } from 'react';
-import { api } from '../api/client';
+import { useState, type FormEvent } from 'react';
+import {
+  EyeIcon, EyeSlashIcon, WarningCircleIcon, InfoIcon, CaretRightIcon,
+  ChartBarIcon, CallBellIcon, CookingPotIcon,
+} from '@phosphor-icons/react';
+import { api, tokenStore } from '../api/client';
 import type { User } from '../api/client';
-import { Spinner } from './UI';
-import { S } from '../utils/styles';
+import { Brand, Spinner } from './UI';
 
 interface LoginPageProps {
   onLogin: (user: User) => void;
+  notice?: string | null;
 }
 
-export default function LoginPage({ onLogin }: LoginPageProps) {
+// Demo accounts are shown only in local development, never on the deployed site.
+const DEMO = import.meta.env.DEV
+  ? [
+      { role: 'Администратор', email: 'admin@resto.com',  password: 'admin',  icon: <ChartBarIcon size={18} /> },
+      { role: 'Официант',      email: 'waiter@resto.com', password: 'waiter', icon: <CallBellIcon size={18} /> },
+      { role: 'Повар',         email: 'chef@resto.com',   password: 'chef',   icon: <CookingPotIcon size={18} /> },
+    ]
+  : [];
+
+export default function LoginPage({ onLogin, notice }: LoginPageProps) {
   const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
+  const [showPass, setShowPass] = useState(false);
   const [error, setError]       = useState('');
+  const [touched, setTouched]   = useState(false);
   const [loading, setLoading]   = useState(false);
 
-  const handle = async () => {
-    if (!email || !password) { setError('Заполните все поля'); return; }
+  const emailInvalid = touched && !/^\S+@\S+\.\S+$/.test(email);
+  const passInvalid  = touched && password.length === 0;
+
+  const signIn = async (e?: string, p?: string) => {
+    const em = (e ?? email).trim(), pw = p ?? password;
+    setTouched(true);
+    if (!/^\S+@\S+\.\S+$/.test(em) || !pw) return;
     setLoading(true); setError('');
     try {
-      const { access_token, user } = await api.login(email, password);
-      localStorage.setItem('resto_token', access_token);
+      const { access_token, user } = await api.login(em, pw);
+      tokenStore.set(access_token);
       onLogin(user);
-    } catch (e) {
-      setError((e as Error).message || 'Ошибка входа');
-    } finally {
+    } catch (err) {
+      setError((err as Error).message || 'Не удалось войти');
       setLoading(false);
     }
   };
 
-  const quick = (role: 'admin' | 'waiter' | 'chef') => {
-    const map = {
-      admin:  ['admin@resto.com',  'admin'],
-      waiter: ['waiter@resto.com', 'waiter'],
-      chef:   ['chef@resto.com',   'chef'],
-    };
-    setEmail(map[role][0]); setPassword(map[role][1]); setError('');
-  };
+  const onSubmit = (e: FormEvent) => { e.preventDefault(); signIn(); };
 
   return (
-    <main className="anim-fade" style={{ minHeight: '100vh', background: '#080808', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
-      <div aria-hidden="true" className="anim-pulse" style={{ position: 'fixed', top: '15%', left: '50%', transform: 'translateX(-50%)', width: 'min(700px, 90vw)', height: 320, background: 'radial-gradient(ellipse, #f59e0b22 0%, transparent 70%)', pointerEvents: 'none' }} />
+    <main className="login" id="main">
+      <div className="login__panel">
+        <div className="login__brand"><Brand /></div>
+        <h1 className="login__title">Вход в систему</h1>
+        <p className="login__subtitle">Используйте рабочий email и пароль</p>
 
-      <div className="anim-fade-up" style={{ width: '100%', maxWidth: 420, padding: 16, position: 'relative' }}>
-        <div style={{ textAlign: 'center', marginBottom: 36 }}>
-          <h1 className="anim-fade-down" style={{ fontFamily: "'Playfair Display', serif", fontSize: 'clamp(36px, 8vw, 48px)', color: '#f59e0b', letterSpacing: '-1.5px', lineHeight: 1, margin: 0 }}>
-            Restaurant<span style={{ color: '#e5e7eb' }}>OS</span>
-          </h1>
-          <p style={{ color: '#3a3a3a', marginTop: 12, fontSize: 12, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
-            Система управления рестораном
-          </p>
-        </div>
-
-        <div className="anim-scale" style={{ ...S.card, border: '1px solid #1e1e1e', boxShadow: '0 0 0 1px #1e1e1e, 0 24px 80px rgba(0,0,0,0.6)', padding: 22 }}>
-          <div style={{ marginBottom: 16 }}>
-            <label htmlFor="login-email" style={S.label}>Email</label>
-            <input id="login-email" style={S.input} type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@resto.com" autoComplete="email" aria-required="true" />
-          </div>
-          <div style={{ marginBottom: 22 }}>
-            <label htmlFor="login-password" style={S.label}>Пароль</label>
-            <input id="login-password" style={S.input} type="password" value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handle()} placeholder="••••••••" autoComplete="current-password" aria-required="true" />
-          </div>
-
+        <form className="login__form" onSubmit={onSubmit} noValidate>
+          {notice && !error && (
+            <div className="alert" role="status" style={{ background: 'var(--surface-2)', color: 'var(--text-2)' }}>
+              <InfoIcon size={18} aria-hidden /> {notice}
+            </div>
+          )}
           {error && (
-            <div role="alert" className="anim-shake" style={{ background: '#7f1d1d', border: '1px solid #ef4444', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: '#fca5a5', marginBottom: 16 }}>
-              {error}
+            <div className="alert" role="alert">
+              <WarningCircleIcon size={18} aria-hidden /> {error}
             </div>
           )}
 
-          <button style={{ ...S.btn(), width: '100%', padding: '13px 0', fontSize: 15, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }} onClick={handle} disabled={loading} aria-busy={loading}>
-            {loading ? <Spinner size={16} color="#000" /> : null}
-            {loading ? 'Вход...' : 'Войти'}
-          </button>
+          <div className="field">
+            <label className="label" htmlFor="login-email">Email</label>
+            <input
+              id="login-email" className="input" type="email" inputMode="email"
+              autoComplete="username" autoCapitalize="none" spellCheck={false}
+              value={email} onChange={(e) => setEmail(e.target.value)}
+              aria-invalid={emailInvalid} aria-describedby={emailInvalid ? 'login-email-err' : undefined}
+              placeholder="name@restaurant.tj"
+            />
+            {emailInvalid && <span className="field-error" id="login-email-err">Введите корректный email</span>}
+          </div>
 
-          <div style={{ marginTop: 26, borderTop: '1px solid #1a1a1a', paddingTop: 20 }}>
-            <p style={{ fontSize: 11, color: '#333', marginBottom: 12, textTransform: 'uppercase', letterSpacing: '0.08em', textAlign: 'center' }}>Быстрый вход</p>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }} role="group" aria-label="Быстрый вход">
-              {(['admin', 'waiter', 'chef'] as const).map((role) => (
-                <button key={role} onClick={() => quick(role)} style={{ ...S.btnGhost, fontSize: 12, padding: '9px 0', textAlign: 'center' }} aria-label={`Войти как ${role}`}>
-                  {role === 'admin' ? '👑 Admin' : role === 'waiter' ? '🍽 Waiter' : '👨‍🍳 Chef'}
+          <div className="field">
+            <label className="label" htmlFor="login-password">Пароль</label>
+            <div className="input-wrap">
+              <input
+                id="login-password" className="input" type={showPass ? 'text' : 'password'}
+                autoComplete="current-password"
+                value={password} onChange={(e) => setPassword(e.target.value)}
+                aria-invalid={passInvalid} aria-describedby={passInvalid ? 'login-pass-err' : undefined}
+              />
+              <button
+                type="button" className="input-wrap__btn"
+                onClick={() => setShowPass((v) => !v)}
+                aria-label={showPass ? 'Скрыть пароль' : 'Показать пароль'} aria-pressed={showPass}
+              >
+                {showPass ? <EyeSlashIcon size={18} /> : <EyeIcon size={18} />}
+              </button>
+            </div>
+            {passInvalid && <span className="field-error" id="login-pass-err">Введите пароль</span>}
+          </div>
+
+          <button type="submit" className="btn btn--primary btn--lg btn--block" disabled={loading}>
+            {loading && <Spinner />}
+            {loading ? 'Входим…' : 'Войти'}
+          </button>
+        </form>
+
+        {DEMO.length > 0 && (
+          <section className="demo" aria-labelledby="demo-title">
+            <h2 className="demo__title" id="demo-title">
+              <InfoIcon size={14} aria-hidden /> Демо-доступ (виден только при локальной разработке)
+            </h2>
+            <div className="demo__list">
+              {DEMO.map((d) => (
+                <button
+                  key={d.email} type="button" className="demo__item" disabled={loading}
+                  onClick={() => { setEmail(d.email); setPassword(d.password); signIn(d.email, d.password); }}
+                >
+                  <span className="demo__icon" aria-hidden="true">{d.icon}</span>
+                  <span>
+                    <span className="demo__role" style={{ display: 'block' }}>{d.role}</span>
+                    <span className="demo__email">{d.email}</span>
+                  </span>
+                  <CaretRightIcon size={16} className="demo__arrow" aria-hidden />
                 </button>
               ))}
             </div>
-          </div>
-        </div>
+          </section>
+        )}
 
-        <p style={{ textAlign: 'center', marginTop: 18, fontSize: 11, color: '#2a2a2a' }}>
-          RestaurantOS · 2026
-        </p>
+        <p className="login__foot">RestaurantOS · система управления рестораном</p>
       </div>
     </main>
   );

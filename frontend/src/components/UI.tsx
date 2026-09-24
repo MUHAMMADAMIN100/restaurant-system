@@ -1,172 +1,258 @@
-import { useEffect, useState, memo, type ReactNode, type CSSProperties } from 'react';
+import {
+  createContext, useCallback, useContext, useEffect, useId, useRef, useState,
+  type CSSProperties, type ReactNode,
+} from 'react';
 import { createPortal } from 'react-dom';
+import {
+  XIcon, CheckCircleIcon, WarningCircleIcon, ClockIcon, FireIcon, ReceiptIcon, WarningIcon,
+} from '@phosphor-icons/react';
+import type { OrderStatus, User } from '../api/client';
+import { STATUS_LABEL, initials } from '../utils/format';
 
+// ── Spinner & skeleton ───────────────────────────────────────────────────────
+export function Spinner({ size = 16, label }: { size?: number; label?: string }) {
+  return (
+    <span
+      className="spinner"
+      style={{ ['--size' as string]: `${size}px` } as CSSProperties}
+      role={label ? 'status' : undefined}
+      aria-label={label}
+      aria-hidden={label ? undefined : true}
+    />
+  );
+}
+
+export function Skeleton({ height = 20, width = '100%', radius }: { height?: number | string; width?: number | string; radius?: number }) {
+  return <div className="skeleton" style={{ height, width, borderRadius: radius }} aria-hidden="true" />;
+}
+
+// ── Empty state ──────────────────────────────────────────────────────────────
+interface EmptyStateProps { icon: ReactNode; title: string; text?: string; action?: ReactNode; }
+export function EmptyState({ icon, title, text, action }: EmptyStateProps) {
+  return (
+    <div className="empty">
+      <div className="empty__icon" aria-hidden="true">{icon}</div>
+      <div className="empty__title">{title}</div>
+      {text && <div className="empty__text">{text}</div>}
+      {action}
+    </div>
+  );
+}
+
+// ── Status badge (colour + icon + text, never colour alone) ──────────────────
+const STATUS_ICON: Record<OrderStatus, ReactNode> = {
+  PENDING: <ClockIcon size={14} weight="bold" aria-hidden />,
+  COOKING: <FireIcon size={14} weight="bold" aria-hidden />,
+  READY:   <CheckCircleIcon size={14} weight="bold" aria-hidden />,
+  CLOSED:  <ReceiptIcon size={14} weight="bold" aria-hidden />,
+};
+
+export function StatusBadge({ status }: { status: OrderStatus }) {
+  return (
+    <span className="status" data-status={status}>
+      {STATUS_ICON[status]}
+      {STATUS_LABEL[status]}
+    </span>
+  );
+}
+
+export function LateBadge({ label = 'Задерживается' }: { label?: string }) {
+  return (
+    <span className="status" data-status="LATE">
+      <WarningIcon size={14} weight="bold" aria-hidden />
+      {label}
+    </span>
+  );
+}
+
+// ── Modal (portal, focus trap, Escape, restores focus) ───────────────────────
 interface ModalProps {
   title: string;
   onClose: () => void;
   children: ReactNode;
-  maxWidth?: number;
+  footer?: ReactNode;
+  width?: number;
+  /** Prevent closing on backdrop/Escape while a request is in flight. */
+  busy?: boolean;
 }
 
-export const Modal = memo(function Modal({ title, onClose, children, maxWidth = 480 }: ModalProps) {
+const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+export function Modal({ title, onClose, children, footer, width = 480, busy = false }: ModalProps) {
+  const titleId = useId();
+  const cardRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  const busyRef = useRef(busy);
+  busyRef.current = busy;
+
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    const card = cardRef.current;
+    const preferred = card?.querySelector<HTMLElement>('[data-autofocus]') ?? card?.querySelector<HTMLElement>('input, select, textarea') ?? card;
+    preferred?.focus();
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !busyRef.current) { e.stopPropagation(); closeRef.current(); return; }
+      if (e.key !== 'Tab' || !card) return;
+      const nodes = Array.from(card.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((n) => n.offsetParent !== null);
+      if (nodes.length === 0) return;
+      const first = nodes[0], last = nodes[nodes.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    };
     document.addEventListener('keydown', onKey);
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    document.body.classList.add('modal-open');
     return () => {
       document.removeEventListener('keydown', onKey);
       document.body.style.overflow = prevOverflow;
-      document.body.classList.remove('modal-open');
+      previouslyFocused?.focus?.();
     };
-  }, [onClose]);
+  }, []);
 
-  // Render into document.body via portal — escapes any parent stacking/transform context
-  // so the modal is always perfectly centered relative to the viewport.
   return createPortal(
     <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="modal-title"
-      onClick={onClose}
-      className="modal-backdrop anim-fade"
+      className="modal-backdrop"
+      onMouseDown={(e) => { if (e.target === e.currentTarget && !busyRef.current) onClose(); }}
     >
       <div
-        onClick={(e) => e.stopPropagation()}
-        className="modal-card anim-scale"
-        style={{ ['--modal-max-width' as string]: `${maxWidth}px` } as CSSProperties}
+        ref={cardRef}
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        style={{ ['--modal-w' as string]: `${width}px` } as CSSProperties}
       >
-        <div className="modal-header">
-          <h2 id="modal-title" style={{ margin: 0, fontSize: 20, fontFamily: "'Playfair Display', serif", color: '#f59e0b', flex: 1 }}>{title}</h2>
-          <button
-            onClick={onClose}
-            aria-label="Закрыть"
-            style={{
-              background: '#1a1a1a', border: '1px solid #2a2a2a',
-              color: '#9ca3af', width: 32, height: 32, borderRadius: 8,
-              cursor: 'pointer', fontSize: 18, lineHeight: 1,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              flexShrink: 0,
-            }}
-          >×</button>
+        <div className="modal__header">
+          <h2 id={titleId} className="modal__title">{title}</h2>
+          <button type="button" className="btn btn--ghost btn--icon btn--sm" onClick={onClose} disabled={busy} aria-label="Закрыть">
+            <XIcon size={18} />
+          </button>
         </div>
-        <div className="modal-body">
-          {children}
-        </div>
+        <div className="modal__body">{children}</div>
+        {footer && <div className="modal__footer">{footer}</div>}
       </div>
     </div>,
     document.body,
   );
-});
-
-interface SpinnerProps {
-  size?: number;
-  color?: string;
 }
 
-export const Spinner = memo(function Spinner({ size = 20, color = '#f59e0b' }: SpinnerProps) {
-  return (
-    <div
-      role="status"
-      aria-label="Загрузка"
-      style={{
-        width: size, height: size,
-        border: `2px solid ${color}22`,
-        borderTopColor: color,
-        borderRadius: '50%',
-        animation: 'spin 0.7s linear infinite',
-        display: 'inline-block',
-      }}
-    />
-  );
-});
-
-interface ToastProps {
-  message: string;
-  type?: 'success' | 'error';
-  onDone: () => void;
+// ── Confirm dialog ───────────────────────────────────────────────────────────
+interface ConfirmProps {
+  title: string;
+  text: ReactNode;
+  confirmLabel: string;
+  danger?: boolean;
+  onConfirm: () => Promise<void> | void;
+  onClose: () => void;
 }
 
-export function Toast({ message, type = 'success', onDone }: ToastProps) {
-  const [closing, setClosing] = useState(false);
-
-  useEffect(() => {
-    const close = setTimeout(() => setClosing(true), 2700);
-    const done  = setTimeout(onDone, 3000);
-    return () => { clearTimeout(close); clearTimeout(done); };
-  }, [onDone]);
-
-  const color = type === 'success' ? '#10b981' : '#ef4444';
-  const bg    = type === 'success' ? '#064e3b' : '#7f1d1d';
-
+export function ConfirmDialog({ title, text, confirmLabel, danger, onConfirm, onClose }: ConfirmProps) {
+  const [busy, setBusy] = useState(false);
+  const run = async () => {
+    setBusy(true);
+    try { await onConfirm(); onClose(); }
+    catch { setBusy(false); }
+  };
   return (
-    <div
-      role="alert"
-      aria-live="polite"
-      className={closing ? 'anim-fade' : 'anim-slide-right'}
-      style={{
-        position: 'fixed',
-        bottom: 'max(20px, env(safe-area-inset-bottom))',
-        right: 16, left: 16,
-        maxWidth: 420,
-        marginLeft: 'auto',
-        background: bg,
-        border: `1px solid ${color}`,
-        borderRadius: 12,
-        padding: '14px 18px',
-        color, fontWeight: 600, fontSize: 14,
-        zIndex: 2000,
-        display: 'flex', alignItems: 'center', gap: 10,
-        boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-        opacity: closing ? 0 : 1,
-        transform: closing ? 'translateX(40px)' : 'translateX(0)',
-        transition: 'opacity 0.3s, transform 0.3s',
-      }}
+    <Modal
+      title={title}
+      onClose={onClose}
+      width={420}
+      busy={busy}
+      footer={
+        <>
+          <button type="button" className="btn" onClick={onClose} disabled={busy}>Отмена</button>
+          <button type="button" className={`btn ${danger ? 'btn--danger' : 'btn--primary'}`} onClick={run} disabled={busy} data-autofocus>
+            {busy && <Spinner />}
+            {confirmLabel}
+          </button>
+        </>
+      }
     >
-      <span aria-hidden="true" style={{ fontSize: 16 }}>{type === 'success' ? '✓' : '✕'}</span>
-      <span style={{ flex: 1 }}>{message}</span>
+      <p style={{ color: 'var(--text-2)' }}>{text}</p>
+    </Modal>
+  );
+}
+
+// ── Toasts (single region for the whole app) ─────────────────────────────────
+type ToastType = 'success' | 'error';
+interface ToastItem { id: number; message: string; type: ToastType; }
+type ShowToast = (message: string, type?: ToastType) => void;
+
+const ToastContext = createContext<ShowToast>(() => {});
+export const useToast = () => useContext(ToastContext);
+
+export function ToastProvider({ children }: { children: ReactNode }) {
+  const [items, setItems] = useState<ToastItem[]>([]);
+  const dismiss = useCallback((id: number) => setItems((p) => p.filter((t) => t.id !== id)), []);
+  const show = useCallback<ShowToast>((message, type = 'success') => {
+    const id = Date.now() + Math.random();
+    setItems((p) => [...p.slice(-2), { id, message, type }]);
+    window.setTimeout(() => dismiss(id), type === 'error' ? 6000 : 3500);
+  }, [dismiss]);
+
+  return (
+    <ToastContext.Provider value={show}>
+      {children}
+      {createPortal(
+        <div className="toast-region" aria-live="polite" aria-relevant="additions">
+          {items.map((t) => (
+            <div key={t.id} className={`toast ${t.type === 'error' ? 'toast--error' : ''}`} role={t.type === 'error' ? 'alert' : 'status'}>
+              <span className="toast__icon" aria-hidden="true">
+                {t.type === 'error' ? <WarningCircleIcon size={18} weight="fill" /> : <CheckCircleIcon size={18} weight="fill" />}
+              </span>
+              <span className="toast__text">{t.message}</span>
+              <button type="button" className="toast__close" onClick={() => dismiss(t.id)} aria-label="Скрыть уведомление">
+                <XIcon size={16} />
+              </button>
+            </div>
+          ))}
+        </div>,
+        document.body,
+      )}
+    </ToastContext.Provider>
+  );
+}
+
+// ── Brand ────────────────────────────────────────────────────────────────────
+export function BrandMark({ size = 32 }: { size?: number }) {
+  return (
+    <span className="brand__mark" style={{ width: size, height: size }} aria-hidden="true">
+      <svg width={size * 0.56} height={size * 0.56} viewBox="0 0 32 32" fill="currentColor">
+        <path d="M9 4v9a4 4 0 0 0 3 3.87V28h3V16.87A4 4 0 0 0 18 13V4h-2v8h-1.5V4h-2v8H11V4Zm15 0c-2.8 0-4.5 3.4-4.5 8.5V18h3v10h3V4Z" />
+      </svg>
+    </span>
+  );
+}
+
+export function Brand() {
+  return (
+    <span className="brand">
+      <BrandMark />
+      <span className="brand__name">Restaurant<span>OS</span></span>
+    </span>
+  );
+}
+
+// ── Current user ─────────────────────────────────────────────────────────────
+export const ROLE_LABEL: Record<User['role'], string> = {
+  admin: 'Администратор',
+  waiter: 'Официант',
+  chef: 'Повар',
+};
+
+export function UserChip({ user }: { user: User }) {
+  const name = user.name.replace(/\s*\(.*?\)\s*/g, '').trim() || user.name;
+  return (
+    <div className="user-chip">
+      <span className="avatar" aria-hidden="true">{initials(user.name)}</span>
+      <span className="user-chip__text">
+        <span className="user-chip__name" title={user.name}>{name}</span>
+        {name !== ROLE_LABEL[user.role] && <span className="user-chip__role">{ROLE_LABEL[user.role]}</span>}
+      </span>
     </div>
   );
 }
-
-interface ToastState { message: string; type: 'success' | 'error'; key: number }
-
-export function useToast() {
-  const [toast, setToast] = useState<ToastState | null>(null);
-  const show = (message: string, type: 'success' | 'error' = 'success') =>
-    setToast({ message, type, key: Date.now() });
-  const hide = () => setToast(null);
-  const node = toast ? <Toast key={toast.key} message={toast.message} type={toast.type} onDone={hide} /> : null;
-  return { show, node };
-}
-
-interface EmptyStateProps {
-  icon: string;
-  text: string;
-}
-
-export const EmptyState = memo(function EmptyState({ icon, text }: EmptyStateProps) {
-  return (
-    <div role="status" className="anim-fade-up" style={{ textAlign: 'center', padding: '52px 24px', color: '#3a3a3a' }}>
-      <div aria-hidden="true" className="anim-float" style={{ fontSize: 44, marginBottom: 14, opacity: 0.7 }}>{icon}</div>
-      <div style={{ fontSize: 14 }}>{text}</div>
-    </div>
-  );
-});
-
-interface SkeletonProps {
-  height?: number | string;
-  width?: number | string;
-  radius?: number;
-}
-
-export const Skeleton = memo(function Skeleton({ height = 20, width = '100%', radius = 8 }: SkeletonProps) {
-  return (
-    <div
-      className="skeleton"
-      style={{ height, width, borderRadius: radius, display: 'block' }}
-      aria-hidden="true"
-    />
-  );
-});

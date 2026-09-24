@@ -1,12 +1,13 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
+import { tokenStore } from '../api/client';
 import type { Order, MenuItem, Category, Payment } from '../api/client';
 
 let socket: Socket | null = null;
 
 export function getSocket(): Socket {
   if (!socket) {
-    const token = localStorage.getItem('resto_token');
+    const token = tokenStore.get();
     const wsUrl = (import.meta.env.VITE_WS_URL as string | undefined) ?? '';
     socket = io(`${wsUrl}/orders`, {
       transports: ['websocket'],
@@ -122,4 +123,31 @@ export function usePaymentSocket({ onCreated }: UsePaymentSocketOptions): void {
     s.on('payment:created', h);
     return () => { s.off('payment:created', h); };
   }, []);
+}
+
+/**
+ * Live connection state. `onReconnect` fires when the socket comes back after a drop,
+ * so screens can refetch whatever they missed while offline.
+ */
+export function useSocketStatus(onReconnect?: () => void): boolean {
+  const [connected, setConnected] = useState(() => getSocket().connected);
+  const cbRef = useRef(onReconnect);
+  cbRef.current = onReconnect;
+
+  useEffect(() => {
+    const s = getSocket();
+    let wasDisconnected = false; // initial connect is covered by the screen's first HTTP load
+    const onConnect = () => {
+      setConnected(true);
+      if (wasDisconnected) cbRef.current?.();
+      wasDisconnected = false;
+    };
+    const onDisconnect = () => { setConnected(false); wasDisconnected = true; };
+    setConnected(s.connected);
+    s.on('connect', onConnect);
+    s.on('disconnect', onDisconnect);
+    return () => { s.off('connect', onConnect); s.off('disconnect', onDisconnect); };
+  }, []);
+
+  return connected;
 }
