@@ -254,6 +254,7 @@ export const ROLE_LABEL: Record<User['role'], string> = {
   admin: 'Администратор',
   waiter: 'Официант',
   chef: 'Повар',
+  manager: 'Менеджер',
 };
 
 export function UserChip({ user }: { user: User }) {

@@ -57,4 +57,7 @@ export class OrdersGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   // ── Payments ──────────────────────────────────────────────────────────────
   emitPaymentCreated(p: any)   { this.server.emit('payment:created', p); }
+
+  // ── Customers (payload-free: managers refetch their list) ─────────────────
+  emitCustomersChanged()       { this.server.emit('customers:changed', {}); }
 }

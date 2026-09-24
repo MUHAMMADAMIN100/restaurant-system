@@ -65,5 +65,32 @@ export function upsertById<T extends { id: number }>(list: T[], item: T, positio
   return next;
 }
 
+/** "+992931234567" → "+992 93 123 45 67" */
+export const formatPhone = (phone: string): string => {
+  const d = phone.replace(/\D/g, '');
+  if (d.length === 12 && d.startsWith('992')) return `+992 ${d.slice(3, 5)} ${d.slice(5, 8)} ${d.slice(8, 10)} ${d.slice(10, 12)}`;
+  return phone;
+};
+
+/** Same rules as the server: 9 local digits or 992 + 9 digits. */
+export const normalizePhone = (input: string): string | null => {
+  const d = (input ?? '').replace(/\D/g, '');
+  if (d.length === 9) return `+992${d}`;
+  if (d.length === 12 && d.startsWith('992')) return `+${d}`;
+  return null;
+};
+
+export const shortDate = (iso: string): string =>
+  new Date(iso).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
+
+export const CALL_RESULT_LABEL: Record<import('../api/client').CallResult, string> = {
+  NO_ANSWER:   'Не дозвонился',
+  COMING_SOON: 'Придёт скоро',
+  DISLIKED:    'Не понравилось',
+  EXPENSIVE:   'Дорого',
+  MOVED:       'Уехал',
+  OTHER:       'Другое',
+};
+
 export const initials = (name: string): string =>
   name.replace(/\(.*?\)/g, '').trim().split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? '').join('') || '?';

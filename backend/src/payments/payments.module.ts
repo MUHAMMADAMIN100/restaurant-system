@@ -12,6 +12,7 @@ import { UserRole } from '../users/user.entity';
 import { Payment, PaymentType } from './payment.entity';
 import { OrdersService, orderTotal } from '../orders/orders.module';
 import { Order, OrderItem, OrderStatus } from '../orders/order.entity';
+import { Customer } from '../customers/customer.entity';
 import { OrdersGateway } from '../gateway/orders.gateway';
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
@@ -58,12 +59,17 @@ export class PaymentsService {
         manager.getRepository(Payment).create({ orderId: order.id, amount, type: dto.type }),
       );
       await manager.getRepository(Order).update(order.id, { status: OrderStatus.CLOSED });
+      // A paid order is the customer's visit.
+      if (order.customerId) {
+        await manager.getRepository(Customer).update(order.customerId, { lastVisitAt: new Date() });
+      }
       return saved;
     });
 
     const closed = await this.ordersService.findOne(dto.orderId);
     this.gateway.emitOrderClosed(closed);
     this.gateway.emitPaymentCreated(payment);
+    if (closed.customerId) this.gateway.emitCustomersChanged();
     return payment;
   }
 

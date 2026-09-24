@@ -4,6 +4,7 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { OrdersService, orderTotal } from './orders.module';
 import { Order, OrderItem, OrderStatus } from './order.entity';
 import { MenuItem } from '../menu/menu-item.entity';
+import { Customer } from '../customers/customer.entity';
 import { OrdersGateway } from '../gateway/orders.gateway';
 
 const mockOrder = (status: OrderStatus): Order => ({
@@ -11,6 +12,8 @@ const mockOrder = (status: OrderStatus): Order => ({
   tableNumber: 5,
   status,
   items: [],
+  customerId: null,
+  customer: null,
   createdAt: new Date(),
 });
 
@@ -25,6 +28,7 @@ describe('OrdersService', () => {
   let orderRepo: any;
   let itemRepo: any;
   let menuRepo: any;
+  let customerRepo: any;
   let gateway: jest.Mocked<Pick<OrdersGateway, 'emitNewOrder' | 'emitStatusChange' | 'emitOrderClosed'>>;
 
   beforeEach(async () => {
@@ -37,6 +41,7 @@ describe('OrdersService', () => {
     };
     itemRepo = { create: jest.fn((x) => x) };
     menuRepo = { find: jest.fn() };
+    customerRepo = { count: jest.fn() };
     gateway = {
       emitNewOrder: jest.fn(),
       emitStatusChange: jest.fn(),
@@ -49,6 +54,7 @@ describe('OrdersService', () => {
         { provide: getRepositoryToken(Order), useValue: orderRepo },
         { provide: getRepositoryToken(OrderItem), useValue: itemRepo },
         { provide: getRepositoryToken(MenuItem), useValue: menuRepo },
+        { provide: getRepositoryToken(Customer), useValue: customerRepo },
         { provide: OrdersGateway, useValue: gateway },
       ],
     }).compile();
@@ -110,6 +116,23 @@ describe('OrdersService', () => {
         service.create({ tableNumber: 3, items: [{ menuItemId: 999, quantity: 1 }] }),
       ).rejects.toThrow(BadRequestException);
       expect(orderRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('привязывает заказ к клиенту', async () => {
+      menuRepo.find.mockResolvedValue([dish({ id: 1 })]);
+      customerRepo.count.mockResolvedValue(1);
+      orderRepo.save.mockResolvedValue(mockOrder(OrderStatus.PENDING));
+      orderRepo.findOne.mockResolvedValue(mockOrder(OrderStatus.PENDING));
+      await service.create({ tableNumber: 2, items: [{ menuItemId: 1, quantity: 1 }], customerId: 7 });
+      expect(orderRepo.create).toHaveBeenCalledWith(expect.objectContaining({ customerId: 7 }));
+    });
+
+    it('отклоняет заказ с несуществующим клиентом', async () => {
+      menuRepo.find.mockResolvedValue([dish({ id: 1 })]);
+      customerRepo.count.mockResolvedValue(0);
+      await expect(
+        service.create({ tableNumber: 2, items: [{ menuItemId: 1, quantity: 1 }], customerId: 404 }),
+      ).rejects.toThrow('Клиент не найден');
     });
 
     it('должен отклонить заказ с недоступным блюдом', async () => {

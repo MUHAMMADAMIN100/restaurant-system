@@ -1,7 +1,7 @@
 import { useRef, useState, type FormEvent, type MouseEvent } from 'react';
 import {
   EyeIcon, EyeSlashIcon, WarningCircleIcon, InfoIcon, CaretRightIcon,
-  ChartBarIcon, CallBellIcon, CookingPotIcon, LightningIcon, ChefHatIcon,
+  ChartBarIcon, CallBellIcon, CookingPotIcon, LightningIcon, ChefHatIcon, UsersThreeIcon,
 } from '@phosphor-icons/react';
 import { api, tokenStore } from '../api/client';
 import type { User } from '../api/client';
@@ -18,6 +18,7 @@ const DEMO = import.meta.env.DEV
       { role: 'Администратор', email: 'admin@resto.com',  password: 'admin',  tone: 'saffron', icon: <ChartBarIcon size={18} weight="duotone" /> },
       { role: 'Официант',      email: 'waiter@resto.com', password: 'waiter', tone: 'violet',  icon: <CallBellIcon size={18} weight="duotone" /> },
       { role: 'Повар',         email: 'chef@resto.com',   password: 'chef',   tone: 'emerald', icon: <CookingPotIcon size={18} weight="duotone" /> },
+      { role: 'Менеджер',      email: 'manager@resto.com', password: 'manager', tone: 'rose',  icon: <UsersThreeIcon size={18} weight="duotone" /> },
     ]
   : [];
 

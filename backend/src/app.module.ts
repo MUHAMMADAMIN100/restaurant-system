@@ -13,6 +13,8 @@ import { MenuItem } from './menu/menu-item.entity';
 import { Order } from './orders/order.entity';
 import { OrderItem } from './orders/order-item.entity';
 import { Payment } from './payments/payment.entity';
+import { Customer, CustomerCall, AppSetting } from './customers/customer.entity';
+import { CustomersModule } from './customers/customers.module';
 
 @Module({
   imports: [
@@ -28,7 +30,7 @@ import { Payment } from './payments/payment.entity';
             password: process.env.DB_PASSWORD || 'postgres',
             database: process.env.DB_NAME || 'restaurant_db',
           }),
-      entities: [User, Category, MenuItem, Order, OrderItem, Payment],
+      entities: [User, Category, MenuItem, Order, OrderItem, Payment, Customer, CustomerCall, AppSetting],
       // createdAt columns are `timestamp without time zone`: make the DB session use the
       // same zone as this process, otherwise times shift when Postgres and Node zones differ.
       extra: { options: `-c timezone=${Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'}` },
@@ -41,6 +43,7 @@ import { Payment } from './payments/payment.entity';
     MenuModule,
     OrdersModule,
     PaymentsModule,
+    CustomersModule,
   ],
 })
 export class AppModule {}

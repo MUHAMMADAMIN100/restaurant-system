@@ -5,12 +5,13 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
-import { IsInt, IsArray, ValidateNested, Min, Max, IsEnum, ArrayMinSize, ArrayMaxSize } from 'class-validator';
+import { IsInt, IsArray, ValidateNested, Min, Max, IsEnum, ArrayMinSize, ArrayMaxSize, IsOptional } from 'class-validator';
 import { Type } from 'class-transformer';
 import { JwtAuthGuard, RolesGuard, Roles } from '../auth/auth.module';
 import { UserRole } from '../users/user.entity';
 import { Order, OrderItem, OrderStatus } from './order.entity';
 import { MenuItem } from '../menu/menu-item.entity';
+import { Customer } from '../customers/customer.entity';
 import { OrdersGateway } from '../gateway/orders.gateway';
 
 export const MAX_TABLE_NUMBER = 50;
@@ -25,6 +26,7 @@ export class CreateOrderDto {
   @IsInt() @Min(1) @Max(MAX_TABLE_NUMBER) @Type(() => Number) tableNumber!: number;
   @IsArray() @ArrayMinSize(1, { message: 'Заказ пустой' }) @ArrayMaxSize(100)
   @ValidateNested({ each: true }) @Type(() => OrderItemDto) items!: OrderItemDto[];
+  @IsOptional() @IsInt() @Type(() => Number) customerId?: number | null;
 }
 
 export class UpdateStatusDto {
@@ -54,6 +56,7 @@ export class OrdersService {
     @InjectRepository(Order)     private orderRepo: Repository<Order>,
     @InjectRepository(OrderItem) private itemRepo: Repository<OrderItem>,
     @InjectRepository(MenuItem)  private menuRepo: Repository<MenuItem>,
+    @InjectRepository(Customer)  private customerRepo: Repository<Customer>,
     private gateway: OrdersGateway,
   ) {}
 
@@ -88,8 +91,13 @@ export class OrdersService {
       throw new BadRequestException(`Сейчас недоступно: ${unavailable.map((d) => d.name).join(', ')}`);
     }
 
+    if (dto.customerId != null && !(await this.customerRepo.count({ where: { id: dto.customerId } }))) {
+      throw new BadRequestException('Клиент не найден. Обновите страницу и выберите клиента заново.');
+    }
+
     const order = this.orderRepo.create({
       tableNumber: dto.tableNumber,
+      customerId: dto.customerId ?? null,
       status: OrderStatus.PENDING,
       items: ids.map((id) =>
         this.itemRepo.create({ menuItemId: id, quantity: quantities.get(id)!, price: Number(byId.get(id)!.price) }),
@@ -147,7 +155,7 @@ export class OrdersController {
 // ── Module ───────────────────────────────────────────────────────────────────
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Order, OrderItem, MenuItem]),
+    TypeOrmModule.forFeature([Order, OrderItem, MenuItem, Customer]),
     require('../auth/auth.module').AuthModule,
   ],
   providers: [OrdersService, OrdersGateway],

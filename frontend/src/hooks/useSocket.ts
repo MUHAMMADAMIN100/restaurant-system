@@ -125,6 +125,18 @@ export function usePaymentSocket({ onCreated }: UsePaymentSocketOptions): void {
   }, []);
 }
 
+/** Fires when anything in the customer base changes (visit, call, edit, threshold). */
+export function useCustomersSocket(onChanged: () => void): void {
+  const cbRef = useRef(onChanged);
+  cbRef.current = onChanged;
+  useEffect(() => {
+    const s = getSocket();
+    const h = () => cbRef.current();
+    s.on('customers:changed', h);
+    return () => { s.off('customers:changed', h); };
+  }, []);
+}
+
 /**
  * Live connection state. `onReconnect` fires when the socket comes back after a drop,
  * so screens can refetch whatever they missed while offline.

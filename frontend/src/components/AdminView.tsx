@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, type FormEvent } from 'react';
 import {
   ChartBarIcon, ListBulletsIcon, TagIcon, SignOutIcon, PlusIcon, PencilSimpleIcon, TrashIcon,
-  MagnifyingGlassIcon, BowlFoodIcon, WarningCircleIcon, ArrowClockwiseIcon, FolderSimpleIcon,
+  MagnifyingGlassIcon, BowlFoodIcon, WarningCircleIcon, ArrowClockwiseIcon, FolderSimpleIcon, UsersThreeIcon,
 } from '@phosphor-icons/react';
 import { api } from '../api/client';
 import type { Category, MenuItem, User } from '../api/client';
@@ -9,13 +9,15 @@ import { Modal, Spinner, useToast, EmptyState, Skeleton, ConfirmDialog, Brand, U
 import { fmt, pluralRu, upsertById } from '../utils/format';
 import { useMenuSocket, useCategorySocket, useSocketStatus } from '../hooks/useSocket';
 import Analytics from './Analytics';
+import CustomersView from './CustomersView';
 import { categoryStyle } from '../utils/category';
 
-type Section = 'analytics' | 'menu' | 'categories';
+type Section = 'analytics' | 'menu' | 'categories' | 'customers';
 const SECTIONS: { key: Section; label: string; icon: JSX.Element }[] = [
   { key: 'analytics',  label: 'Аналитика', icon: <ChartBarIcon size={20} aria-hidden /> },
   { key: 'menu',       label: 'Меню',      icon: <ListBulletsIcon size={20} aria-hidden /> },
   { key: 'categories', label: 'Категории', icon: <TagIcon size={20} aria-hidden /> },
+  { key: 'customers',  label: 'Клиенты',   icon: <UsersThreeIcon size={20} aria-hidden /> },
 ];
 const sectionFromHash = (): Section => {
   const h = window.location.hash.replace('#', '');
@@ -537,6 +539,7 @@ export default function AdminView({ user, onLogout }: { user: User; onLogout: ()
 
   const content = () => {
     if (section === 'analytics') return <Analytics />;
+    if (section === 'customers') return <CustomersView />;
     if (loading) return <div className="stack" aria-busy="true"><Skeleton height={48} width={280} /><Skeleton height={420} radius={12} /></div>;
     if (loadError) {
       return (

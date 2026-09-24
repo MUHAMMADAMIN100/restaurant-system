@@ -2,21 +2,22 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   PlusIcon, MinusIcon, MagnifyingGlassIcon, ForkKnifeIcon, BowlFoodIcon, ReceiptIcon,
   MoneyIcon, CreditCardIcon, TrashIcon, WarningCircleIcon, CaretLeftIcon, CaretRightIcon,
-  ShoppingCartSimpleIcon, ArrowClockwiseIcon, ClockIcon, CheckCircleIcon,
+  ShoppingCartSimpleIcon, ArrowClockwiseIcon, ClockIcon, CheckCircleIcon, UserIcon, UserPlusIcon, XIcon,
 } from '@phosphor-icons/react';
 import { api, ApiError } from '../api/client';
-import type { Order, Category, MenuItem } from '../api/client';
+import type { Order, Category, MenuItem, CustomerBrief } from '../api/client';
 import { useOrderSocket, useMenuSocket, useCategorySocket, useSocketStatus } from '../hooks/useSocket';
 import { useNow } from '../hooks/useNow';
 import { Spinner, useToast, EmptyState, Modal, Skeleton, StatusBadge, AnimatedNumber } from './UI';
 import { categoryStyle } from '../utils/category';
 import { flyToCart } from '../utils/flyToCart';
-import { fmt, timeAgo, calcTotal, linePrice, pluralRu, upsertById } from '../utils/format';
+import { fmt, timeAgo, calcTotal, linePrice, pluralRu, upsertById, formatPhone, normalizePhone } from '../utils/format';
 
 const PAGE_SIZE = 12;
 const MAX_TABLE = 50;
 const CART_KEY = 'resto_cart';
 const TABLE_KEY = 'resto_table';
+const CUSTOMER_KEY = 'resto_customer';
 
 const storage = {
   get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } },
@@ -147,6 +148,7 @@ function ActiveOrders({ orders, onPay }: { orders: Order[]; onPay: (o: Order) =>
                   <div>
                     <div className="ticket__table">Стол {order.tableNumber}</div>
                     <div className="ticket__meta"><span>№ {order.id}</span><span aria-hidden>·</span><ClockIcon size={12} aria-hidden /><span>{timeAgo(order.createdAt, now)}</span></div>
+                    {order.customer && <div className="ticket__customer"><UserIcon size={12} weight="bold" aria-hidden />{order.customer.name}</div>}
                   </div>
                   <StatusBadge status={order.status} />
                 </div>
@@ -180,6 +182,126 @@ function ActiveOrders({ orders, onPay }: { orders: Order[]; onPay: (o: Order) =>
   );
 }
 
+// ── Customer picker (optional guest for the order → counts as their visit) ────
+function CustomerPicker({ value, onChange, idPrefix }: { value: CustomerBrief | null; onChange: (c: CustomerBrief | null) => void; idPrefix: string }) {
+  const [q, setQ]               = useState('');
+  const [results, setResults]   = useState<CustomerBrief[]>([]);
+  const [open, setOpen]         = useState(false);
+  const [searching, setSearching] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName]   = useState('');
+  const [newPhone, setNewPhone] = useState('');
+  const [error, setError]       = useState('');
+  const [saving, setSaving]     = useState(false);
+  const toast = useToast();
+  const inputId = `${idPrefix}-customer`;
+
+  useEffect(() => {
+    const term = q.trim();
+    if (term.length < 2) { setResults([]); return; }
+    setSearching(true);
+    const t = window.setTimeout(() => {
+      api.lookupCustomers(term).then(setResults).catch(() => setResults([])).finally(() => setSearching(false));
+    }, 250);
+    return () => window.clearTimeout(t);
+  }, [q]);
+
+  const startCreate = () => {
+    const digits = q.replace(/\D/g, '');
+    setNewPhone(digits.length >= 3 ? q.trim() : '+992 ');
+    setNewName(digits.length >= 3 ? '' : q.trim());
+    setCreating(true); setOpen(false); setError('');
+  };
+
+  const pick = (c: CustomerBrief) => { onChange(c); setQ(''); setOpen(false); setCreating(false); };
+
+  const create = async () => {
+    const phone = normalizePhone(newPhone);
+    if (!newName.trim()) { setError('Введите имя'); return; }
+    if (!phone) { setError('Номер в формате +992 XX XXX XX XX'); return; }
+    setSaving(true); setError('');
+    try {
+      const c = await api.createCustomer({ name: newName.trim(), phone });
+      pick({ id: c.id, name: c.name, phone: c.phone });
+      toast(`${c.name} добавлен в базу клиентов`);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) {
+        // Already in the base → just select that customer.
+        const found = (await api.lookupCustomers(phone.slice(-9)).catch(() => [])).find((x) => x.phone === phone);
+        if (found) { pick(found); toast(`Клиент уже есть в базе: ${found.name} — выбран`); return; }
+      }
+      setError((e as Error).message);
+    } finally { setSaving(false); }
+  };
+
+  if (value) {
+    return (
+      <div className="field">
+        <span className="label">Клиент</span>
+        <div className="cpick__chosen">
+          <UserIcon size={20} weight="duotone" aria-hidden style={{ color: '#6D28D9' }} />
+          <span className="cpick__chosen-text"><strong>{value.name}</strong><small className="num">{formatPhone(value.phone)}</small></span>
+          <button type="button" className="btn btn--ghost btn--icon btn--sm" onClick={() => onChange(null)} aria-label="Убрать клиента из заказа"><XIcon size={16} /></button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="field cpick">
+      <label className="label" htmlFor={inputId}>Клиент <span className="muted" style={{ fontWeight: 400 }}>— необязательно</span></label>
+      {!creating && (
+        <>
+          <div className="input-wrap input-wrap--lead">
+            <span className="input-wrap__lead"><UserIcon size={18} aria-hidden /></span>
+            <input id={inputId} className="input" value={q} placeholder="Телефон или имя" autoComplete="off"
+              role="combobox" aria-expanded={open && q.trim().length >= 2} aria-controls={`${inputId}-list`} aria-autocomplete="list"
+              onChange={(e) => { setQ(e.target.value); setOpen(true); }}
+              onFocus={() => setOpen(true)}
+              onBlur={() => window.setTimeout(() => setOpen(false), 150)}
+              onKeyDown={(e) => { if (e.key === 'Escape') setOpen(false); }} />
+          </div>
+          {open && q.trim().length >= 2 && (
+            <ul className="cpick__list" id={`${inputId}-list`} role="listbox" aria-label="Найденные клиенты">
+              {searching && results.length === 0 && <li className="cpick__opt muted" role="option" aria-selected={false}><Spinner size={14} /> Ищем…</li>}
+              {results.map((c) => (
+                <li key={c.id} role="option" aria-selected={false}>
+                  <button type="button" className="cpick__opt" onMouseDown={(e) => e.preventDefault()} onClick={() => pick(c)}>
+                    <UserIcon size={18} aria-hidden /><span><strong>{c.name}</strong><small className="num">{formatPhone(c.phone)}</small></span>
+                  </button>
+                </li>
+              ))}
+              {!searching && results.length === 0 && <li className="cpick__opt muted" role="option" aria-selected={false}>Никого не нашли</li>}
+              <li role="option" aria-selected={false}>
+                <button type="button" className="cpick__opt cpick__new" onMouseDown={(e) => e.preventDefault()} onClick={startCreate}>
+                  <UserPlusIcon size={18} aria-hidden /> Новый клиент
+                </button>
+              </li>
+            </ul>
+          )}
+          {q.trim().length < 2 && (
+            <button type="button" className="btn btn--ghost btn--sm" style={{ justifySelf: 'start', paddingLeft: 0 }} onClick={startCreate}>
+              <UserPlusIcon size={16} aria-hidden /> Добавить нового клиента
+            </button>
+          )}
+        </>
+      )}
+      {creating && (
+        <div className="cpick__form">
+          <input className="input" placeholder="Имя клиента" aria-label="Имя нового клиента" value={newName} onChange={(e) => setNewName(e.target.value)} autoFocus={!newName} />
+          <input className="input num" type="tel" inputMode="tel" placeholder="+992 XX XXX XX XX" aria-label="Телефон нового клиента" value={newPhone}
+            onChange={(e) => setNewPhone(e.target.value)} onBlur={() => { const n = normalizePhone(newPhone); if (n) setNewPhone(formatPhone(n)); }} />
+          {error && <span className="field-error" role="alert"><WarningCircleIcon size={14} aria-hidden />{error}</span>}
+          <div className="row">
+            <button type="button" className="btn btn--sm" onClick={() => { setCreating(false); setError(''); }} disabled={saving}>Отмена</button>
+            <button type="button" className="btn btn--primary btn--sm" onClick={create} disabled={saving}>{saving && <Spinner size={14} />} Сохранить клиента</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Cart panel (desktop sidebar + mobile sheet) ───────────────────────────────
 interface CartPanelProps {
   lines: CartLine[];
@@ -193,8 +315,10 @@ interface CartPanelProps {
   onSubmit: () => void;
   submitting: boolean;
   idPrefix: string;
+  customer: CustomerBrief | null;
+  onCustomer: (c: CustomerBrief | null) => void;
 }
-function CartPanel({ lines, total, tableNumber, tableError, onTable, onAdd, onRemove, onClear, onSubmit, submitting, idPrefix }: CartPanelProps) {
+function CartPanel({ lines, total, tableNumber, tableError, onTable, onAdd, onRemove, onClear, onSubmit, submitting, idPrefix, customer, onCustomer }: CartPanelProps) {
   const qty = lines.reduce((s, l) => s + l.qty, 0);
   const unavailable = lines.filter((l) => !l.item.isAvailable);
   const tableId = `${idPrefix}-table`;
@@ -209,6 +333,9 @@ function CartPanel({ lines, total, tableNumber, tableError, onTable, onAdd, onRe
             aria-invalid={!!tableError} aria-describedby={tableError ? `${tableId}-err` : undefined}
           />
           {tableError && <span className="field-error" id={`${tableId}-err`}><WarningCircleIcon size={14} aria-hidden />{tableError}</span>}
+        </div>
+        <div style={{ marginTop: 'var(--sp-3)' }}>
+          <CustomerPicker value={customer} onChange={onCustomer} idPrefix={idPrefix} />
         </div>
       </div>
 
@@ -275,6 +402,9 @@ export default function WaiterView() {
   });
   const [tableNumber, setTableNumber] = useState(() => storage.get(TABLE_KEY) || '');
   const [tableError, setTableError] = useState('');
+  const [customer, setCustomer] = useState<CustomerBrief | null>(() => {
+    try { return JSON.parse(storage.get(CUSTOMER_KEY) || 'null'); } catch { return null; }
+  });
   const [submitting, setSubmitting] = useState(false);
   const [payOrder, setPayOrder]     = useState<Order | null>(null);
   const [cartOpen, setCartOpen]     = useState(false);
@@ -295,6 +425,7 @@ export default function WaiterView() {
 
   useEffect(() => { storage.set(CART_KEY, JSON.stringify(cart)); }, [cart]);
   useEffect(() => { storage.set(TABLE_KEY, tableNumber); }, [tableNumber]);
+  useEffect(() => { if (customer) storage.set(CUSTOMER_KEY, JSON.stringify(customer)); else storage.del(CUSTOMER_KEY); }, [customer]);
 
   useOrderSocket({
     onNew:    (o) => setOrders((p) => upsertById(p, o, 'start')),
@@ -349,12 +480,14 @@ export default function WaiterView() {
       const created = await api.createOrder({
         tableNumber: t,
         items: lines.map(({ item, qty }) => ({ menuItemId: item.id, quantity: qty })),
+        customerId: customer?.id ?? null,
       });
       // The WebSocket may have delivered it already — upsert keeps a single copy.
       setOrders((p) => upsertById(p, created, 'start'));
       // Clear only after the server confirmed, so nothing is lost on failure.
       clearCart();
       setTableNumber('');
+      setCustomer(null);
       setCartOpen(false);
       toast(`Заказ для стола ${t} отправлен на кухню`);
     } catch (e) {
@@ -405,7 +538,7 @@ export default function WaiterView() {
   const readyCount = orders.filter((o) => o.status === 'READY').length;
   const panelProps = {
     lines, total: cartTotal, tableNumber, tableError, onTable, onAdd: addToCart, onRemove: removeFromCart,
-    onClear: clearCart, onSubmit: submitOrder, submitting,
+    onClear: clearCart, onSubmit: submitOrder, submitting, customer, onCustomer: setCustomer,
   };
 
   return (

@@ -2,7 +2,7 @@ export interface User {
   id: number;
   name: string;
   email: string;
-  role: 'admin' | 'waiter' | 'chef';
+  role: 'admin' | 'waiter' | 'chef' | 'manager';
   createdAt: string;
 }
 
@@ -39,6 +39,36 @@ export interface Order {
   status: OrderStatus;
   items: OrderItem[];
   createdAt: string;
+  customerId?: number | null;
+  customer?: { id: number; name: string; phone: string } | null;
+}
+
+export type CallResult = 'NO_ANSWER' | 'COMING_SOON' | 'DISLIKED' | 'EXPENSIVE' | 'MOVED' | 'OTHER';
+export type CustomerState = 'overdue' | 'called' | 'ok';
+
+export interface CustomerBrief { id: number; name: string; phone: string; }
+
+export interface Customer extends CustomerBrief {
+  createdAt: string;
+  lastVisitAt: string | null;
+  lastCallAt: string | null;
+  lastCallResult: CallResult | null;
+  lastCallComment: string | null;
+  status: { daysAway: number; neverVisited: boolean; state: CustomerState };
+}
+
+export interface CustomerList {
+  inactiveDays: number;
+  summary: { total: number; overdue: number; calledToday: number };
+  items: Customer[];
+}
+
+export interface CustomerCall {
+  id: number;
+  result: CallResult;
+  comment: string | null;
+  createdAt: string;
+  userName: string | null;
 }
 
 export interface Payment {
@@ -142,7 +172,7 @@ export const api = {
   deleteMenuItem: (id: number)                 => request<{ message: string }>('DELETE', `/menu/${id}`),
 
   getOrders:   (status?: OrderStatus)          => request<Order[]>('GET', `/orders${status ? `?status=${status}` : ''}`),
-  createOrder: (data: { tableNumber: number; items: { menuItemId: number; quantity: number }[] }) =>
+  createOrder: (data: { tableNumber: number; items: { menuItemId: number; quantity: number }[]; customerId?: number | null }) =>
     request<Order>('POST', '/orders', data),
   updateStatus: (id: number, status: OrderStatus) =>
     request<Order>('PATCH', `/orders/${id}/status`, { status }),
@@ -151,4 +181,14 @@ export const api = {
   getAnalytics:  (period: AnalyticsPeriod = 'all') => request<Analytics>('GET', `/payments/analytics?period=${period}`),
   createPayment: (data: { orderId: number; type: 'CASH' | 'CARD' }) =>
     request<Payment>('POST', '/payments', data),
+
+  getCustomers:     (search?: string) => request<CustomerList>('GET', `/customers${search ? `?search=${encodeURIComponent(search)}` : ''}`),
+  lookupCustomers:  (q: string) => request<CustomerBrief[]>('GET', `/customers/lookup?q=${encodeURIComponent(q)}`),
+  createCustomer:   (data: { name: string; phone: string }) => request<Customer>('POST', '/customers', data),
+  updateCustomer:   (id: number, data: { name?: string; phone?: string }) => request<Customer>('PATCH', `/customers/${id}`, data),
+  deleteCustomer:   (id: number) => request<{ message: string }>('DELETE', `/customers/${id}`),
+  getCustomerCalls: (id: number) => request<CustomerCall[]>('GET', `/customers/${id}/calls`),
+  addCustomerCall:  (id: number, data: { result: CallResult; comment?: string | null }) => request<CustomerCall>('POST', `/customers/${id}/calls`, data),
+  getCustomerSettings: () => request<{ inactiveDays: number }>('GET', '/settings/customers'),
+  setCustomerSettings: (inactiveDays: number) => request<{ inactiveDays: number }>('PATCH', '/settings/customers', { inactiveDays }),
 };

@@ -56,6 +56,7 @@ npm run seed
 | Admin   | admin@resto.com    | admin   |
 | Waiter  | waiter@resto.com   | waiter  |
 | Chef    | chef@resto.com     | chef    |
+| Manager | manager@resto.com  | manager |
 
 Локально их можно не вводить: на странице входа есть кнопки «Демо-доступ».
 
@@ -99,6 +100,12 @@ npm run dev
 | GET    | /payments                  | Платежи                                                     | Admin, Waiter  |
 | GET    | /payments/analytics        | Аналитика (`?period=today\|week\|month\|all`)              | Admin          |
 | POST   | /payments                  | Принять оплату `{ orderId, type }` — сумму считает сервер  | Admin, Waiter  |
+| GET    | /customers                 | База клиентов со статусом (красная зона наверху)            | Admin, Manager |
+| GET    | /customers/lookup?q=       | Поиск клиента по имени/номеру для заказа                    | Admin, Manager, Waiter |
+| POST   | /customers                 | Добавить клиента `{ name, phone }` (+992…)                  | Admin, Manager, Waiter |
+| PATCH/DELETE | /customers/:id       | Изменить / удалить клиента                                  | Admin, Manager |
+| GET/POST | /customers/:id/calls     | История звонков / записать звонок `{ result, comment }`     | Admin, Manager |
+| GET/PATCH | /settings/customers     | Порог красной зоны `{ inactiveDays }` (по умолчанию 5)      | Admin, Manager |
 
 ## WebSocket (Socket.io)
 

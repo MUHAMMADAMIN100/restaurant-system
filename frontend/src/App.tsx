@@ -7,6 +7,7 @@ import LoginPage from './components/LoginPage';
 import AdminView from './components/AdminView';
 import WaiterView from './components/WaiterView';
 import ChefView from './components/ChefView';
+import CustomersView from './components/CustomersView';
 import { Brand, Spinner, ToastProvider, UserChip } from './components/UI';
 
 // ── Error boundary ───────────────────────────────────────────────────────────
@@ -83,11 +84,14 @@ export default function App() {
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content', kitchen ? '#18181B' : '#FFFFFF');
   }, [user]);
 
-  const handleLogin = (u: User) => { setNotice(null); setUser(u); };
+  // Login and logout swap the whole screen: start the new one from the top
+  // (on phones the login form is often scrolled down to the demo buttons).
+  const handleLogin = (u: User) => { setNotice(null); setUser(u); window.scrollTo(0, 0); };
   const handleLogout = () => {
     tokenStore.clear();
     disconnectSocket();
     setUser(null);
+    window.scrollTo(0, 0);
   };
 
   if (checking) {
@@ -111,9 +115,11 @@ export default function App() {
           {user.role === 'admin' && <AdminView user={user} onLogout={handleLogout} />}
           {user.role !== 'admin' && (
             <>
-              <Topbar user={user} context={user.role === 'waiter' ? 'Зал' : 'Кухня'} onLogout={handleLogout} />
+              <Topbar user={user} context={user.role === 'waiter' ? 'Зал' : user.role === 'chef' ? 'Кухня' : 'Клиенты'} onLogout={handleLogout} />
               <main id="main" className="page" tabIndex={-1}>
-                {user.role === 'waiter' ? <WaiterView /> : <ChefView />}
+                {user.role === 'waiter' && <WaiterView />}
+                {user.role === 'chef' && <ChefView />}
+                {user.role === 'manager' && <CustomersView />}
               </main>
             </>
           )}

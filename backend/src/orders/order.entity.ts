@@ -1,5 +1,6 @@
 import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, OneToMany, JoinColumn, CreateDateColumn } from 'typeorm';
 import { MenuItem } from '../menu/menu-item.entity';
+import { Customer } from '../customers/customer.entity';
 
 export enum OrderStatus {
   PENDING = 'PENDING',
@@ -21,6 +22,14 @@ export class Order {
 
   @OneToMany(() => OrderItem, (oi) => oi.order, { cascade: true, eager: true })
   items!: OrderItem[];
+
+  /** Optional: the guest this order belongs to (a paid order counts as their visit). */
+  @Column({ type: 'int', nullable: true })
+  customerId!: number | null;
+
+  @ManyToOne(() => Customer, { onDelete: 'SET NULL', nullable: true, eager: true })
+  @JoinColumn({ name: 'customerId' })
+  customer!: Customer | null;
 
   @CreateDateColumn()
   createdAt!: Date;

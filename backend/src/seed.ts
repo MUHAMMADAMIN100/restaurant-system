@@ -4,6 +4,9 @@ import * as bcrypt from 'bcryptjs';
 import { User, UserRole } from './users/user.entity';
 import { Category } from './categories/category.entity';
 import { MenuItem } from './menu/menu-item.entity';
+import { Order, OrderItem } from './orders/order.entity';
+import { Payment } from './payments/payment.entity';
+import { Customer, CustomerCall, AppSetting, CallResult } from './customers/customer.entity';
 import * as dotenv from 'dotenv';
 dotenv.config();
 
@@ -21,7 +24,9 @@ const AppDataSource = new DataSource({
         password: process.env.DB_PASSWORD || 'postgres',
         database: process.env.DB_NAME || 'restaurant_db',
       }),
-  entities: [User, Category, MenuItem],
+  entities: [User, Category, MenuItem, Order, OrderItem, Payment, Customer, CustomerCall, AppSetting],
+  // Same session timezone as the app (see app.module.ts).
+  extra: { options: `-c timezone=${Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'}` },
   synchronize: true,
 } as any);
 
@@ -39,6 +44,14 @@ async function seed() {
       { name: 'Дилноза (Официант)', email: 'waiter2@resto.com',password: await bcrypt.hash('waiter', 10), role: UserRole.WAITER },
     ]));
     console.log('✅ Users created');
+  }
+  // Manager is added separately so existing databases get the account too.
+  let manager = await userRepo.findOne({ where: { email: 'manager@resto.com' } });
+  if (!manager) {
+    manager = await userRepo.save(userRepo.create({
+      name: 'Сабина (Менеджер)', email: 'manager@resto.com', password: await bcrypt.hash('manager', 10), role: UserRole.MANAGER,
+    }));
+    console.log('✅ Manager created');
   }
 
   // ── Categories ─────────────────────────────────────────────────────────────
@@ -379,6 +392,42 @@ async function seed() {
       },
     ]));
     console.log(`✅ Menu items created (${await menuRepo.count()} items)`);
+  }
+
+  // ── Demo customers ─────────────────────────────────────────────────────────
+  const customerRepo = AppDataSource.getRepository(Customer);
+  if ((await customerRepo.count()) === 0) {
+    const DAY = 24 * 60 * 60 * 1000;
+    const ago = (days: number) => new Date(Date.now() - days * DAY);
+    // [name, phone, days since last visit (null = never), days since added, call?]
+    const demo: [string, string, number | null, number, [CallResult, number, string | null]?][] = [
+      ['Фаррух Назаров',    '+992931234501', 1,    120],
+      ['Мадина Рахимова',   '+992900456702', 2,    90],
+      ['Сухроб Каримов',    '+992985551203', 0.2,  60],
+      ['Нигина Шарипова',   '+992918877604', 3,    75],
+      ['Бахтиёр Юсупов',    '+992555234105', 4.8,  40],
+      ['Зарина Хакимова',   '+992934401206', 6,    110],
+      ['Далер Саидов',      '+992889012307', 8,    80],
+      ['Шахло Мирзоева',    '+992904567808', 12,   150],
+      ['Рустам Давлатов',   '+992937788909', 15,   200],
+      ['Малика Турсунова',  '+992981122310', 21,   95],
+      ['Фирдавс Исмоилов',  '+992927654311', 9,    70,  [CallResult.COMING_SOON, 1, 'Был в командировке, придёт в пятницу с семьёй']],
+      ['Гулнора Азимова',   '+992933344512', 7,    65,  [CallResult.NO_ANSWER, 1, null]],
+      ['Сорбон Холов',      '+992905566713', 11,   100, [CallResult.EXPENSIVE, 2, 'Считает, что шашлык подорожал']],
+      ['Ситора Раджабова',  '+992938899014', null, 8],
+      ['Умед Бобоев',       '+992917788015', null, 2],
+    ];
+    const callRepo = AppDataSource.getRepository(CustomerCall);
+    for (const [name, phone, visit, added, call] of demo) {
+      const c = await customerRepo.save(customerRepo.create({
+        name, phone, createdAt: ago(added), lastVisitAt: visit === null ? null : ago(visit),
+        ...(call ? { lastCallAt: ago(call[1]), lastCallResult: call[0], lastCallComment: call[2] } : {}),
+      }));
+      if (call) {
+        await callRepo.save(callRepo.create({ customerId: c.id, result: call[0], comment: call[2], userId: manager.id, createdAt: ago(call[1]) }));
+      }
+    }
+    console.log(`✅ Demo customers created (${demo.length})`);
   }
 
   await AppDataSource.destroy();
