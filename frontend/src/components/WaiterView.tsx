@@ -8,7 +8,9 @@ import { api, ApiError } from '../api/client';
 import type { Order, Category, MenuItem } from '../api/client';
 import { useOrderSocket, useMenuSocket, useCategorySocket, useSocketStatus } from '../hooks/useSocket';
 import { useNow } from '../hooks/useNow';
-import { Spinner, useToast, EmptyState, Modal, Skeleton, StatusBadge } from './UI';
+import { Spinner, useToast, EmptyState, Modal, Skeleton, StatusBadge, AnimatedNumber } from './UI';
+import { categoryStyle } from '../utils/category';
+import { flyToCart } from '../utils/flyToCart';
 import { fmt, timeAgo, calcTotal, linePrice, pluralRu, upsertById } from '../utils/format';
 
 const PAGE_SIZE = 12;
@@ -138,8 +140,9 @@ function ActiveOrders({ orders, onPay }: { orders: Order[]; onPay: (o: Order) =>
       ) : (
         <>
           <div className="tickets">
-            {paged.map((order) => (
-              <article key={order.id} className={`card ticket ${order.status === 'READY' ? 'is-ready' : ''}`} aria-label={`Стол ${order.tableNumber}`}>
+            {paged.map((order, idx) => (
+              <article key={order.id} className={`card ticket reveal ${order.status === 'READY' ? 'is-ready' : ''}`} data-status={order.status}
+                style={{ ['--i' as string]: idx }} aria-label={`Стол ${order.tableNumber}`}>
                 <div className="ticket__head">
                   <div>
                     <div className="ticket__table">Стол {order.tableNumber}</div>
@@ -238,7 +241,7 @@ function CartPanel({ lines, total, tableNumber, tableError, onTable, onAdd, onRe
         )}
         <div className="cart__total">
           <span className="cart__total-label">{qty > 0 ? `${qty} ${pluralRu(qty, ['позиция', 'позиции', 'позиций'])}` : 'Итого'}</span>
-          <span className="cart__total-value">{fmt(total)}</span>
+          <AnimatedNumber className="cart__total-value" value={total} format={fmt} />
         </div>
         <button
           type="button" className="btn btn--primary btn--lg btn--block" onClick={onSubmit}
@@ -319,6 +322,11 @@ export default function WaiterView() {
     return n;
   });
   const clearCart = () => setCart({});
+  const addWithFly = (item: MenuItem, from: HTMLElement) => {
+    const media = from.closest('.dish')?.querySelector<HTMLElement>('.dish__media') ?? from;
+    flyToCart(media, item.imageUrl);
+    addToCart(item.id);
+  };
 
   const lines: CartLine[] = Object.entries(cart)
     .map(([id, qty]) => ({ item: menu.find((m) => m.id === Number(id)), qty }))
@@ -424,9 +432,14 @@ export default function WaiterView() {
               </div>
               <div className="chips" role="group" aria-label="Категории">
                 <button type="button" className="chip" aria-pressed={!selectedCat} onClick={() => setSelectedCat(null)}>Все</button>
-                {categories.map((c) => (
-                  <button key={c.id} type="button" className="chip" aria-pressed={selectedCat === c.id} onClick={() => setSelectedCat(selectedCat === c.id ? null : c.id)}>{c.name}</button>
-                ))}
+                {categories.map((c) => {
+                  const { tone, Icon } = categoryStyle(c.name, c.id);
+                  return (
+                    <button key={c.id} type="button" className="chip" data-tone={tone} aria-pressed={selectedCat === c.id} onClick={() => setSelectedCat(selectedCat === c.id ? null : c.id)}>
+                      <span className="chip__icon" aria-hidden><Icon size={16} weight="duotone" /></span>{c.name}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
@@ -441,23 +454,24 @@ export default function WaiterView() {
               </div>
             ) : (
               <div className="menu-grid">
-                {filteredMenu.map((item) => {
+                {filteredMenu.map((item, idx) => {
                   const q = cart[item.id] ?? 0;
                   const catName = item.category?.name ?? categories.find((c) => c.id === item.categoryId)?.name;
+                  const { tone, Icon: CatIcon } = categoryStyle(catName, item.categoryId);
                   return (
-                    <article key={item.id} className={`dish ${q ? 'is-selected' : ''}`}>
-                      <button type="button" className="dish__main" onClick={() => addToCart(item.id)} aria-label={`${item.name}, ${fmt(item.price)}, добавить в заказ`}>
+                    <article key={item.id} className={`dish reveal ${q ? 'is-selected' : ''}`} data-tone={tone} style={{ ['--i' as string]: idx }}>
+                      <button type="button" className="dish__main" onClick={(e) => addWithFly(item, e.currentTarget)} aria-label={`${item.name}, ${fmt(item.price)}, добавить в заказ`}>
                         <span className="dish__media">
-                          <span className="dish__placeholder" aria-hidden><BowlFoodIcon size={32} /></span>
+                          <span className="dish__placeholder" aria-hidden><CatIcon size={40} weight="duotone" /></span>
                           {item.imageUrl && (
                             <img src={item.imageUrl} alt="" loading="lazy" width={400} height={300}
                               style={{ position: 'relative' }}
                               onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
                           )}
-                          {q > 0 && <span className="dish__qty" aria-hidden>{q}</span>}
+                          {q > 0 && <span key={q} className="dish__qty bump" aria-hidden>{q}</span>}
                         </span>
                         <span className="dish__body">
-                          {catName && <span className="dish__cat">{catName}</span>}
+                          {catName && <span className="dish__cat tone-pill"><CatIcon size={12} weight="bold" aria-hidden />{catName}</span>}
                           <span className="dish__name">{item.name}</span>
                           {item.description && <span className="dish__desc">{item.description}</span>}
                         </span>
@@ -468,11 +482,11 @@ export default function WaiterView() {
                           <div className="stepper stepper--sm">
                             <button type="button" className="stepper__btn" onClick={() => removeFromCart(item.id)} aria-label={`Убрать порцию: ${item.name}`}><MinusIcon size={14} weight="bold" /></button>
                             <span className="stepper__value">{q}</span>
-                            <button type="button" className="stepper__btn" onClick={() => addToCart(item.id)} aria-label={`Добавить порцию: ${item.name}`}><PlusIcon size={14} weight="bold" /></button>
+                            <button type="button" className="stepper__btn" onClick={(e) => addWithFly(item, e.currentTarget)} aria-label={`Добавить порцию: ${item.name}`}><PlusIcon size={14} weight="bold" /></button>
                           </div>
                         ) : (
-                          <button type="button" className="btn btn--icon btn--sm" onClick={() => addToCart(item.id)} aria-label={`Добавить: ${item.name}`}>
-                            <PlusIcon size={16} weight="bold" />
+                          <button type="button" className="btn--add" onClick={(e) => addWithFly(item, e.currentTarget)} aria-label={`Добавить: ${item.name}`}>
+                            <PlusIcon size={18} weight="bold" />
                           </button>
                         )}
                       </div>
@@ -485,9 +499,9 @@ export default function WaiterView() {
 
           <aside className="card cart" aria-label="Текущий заказ">
             <div className="cart__inner">
-              <div className="cart__head">
+              <div className="cart__head" data-cart-target>
                 <h2 className="cart__title">Заказ</h2>
-                {cartQty > 0 && <span className="count">{cartQty}</span>}
+                {cartQty > 0 && <span key={cartQty} className="count bump">{cartQty}</span>}
               </div>
               <CartPanel {...panelProps} idPrefix="cart-desktop" />
             </div>
@@ -501,9 +515,9 @@ export default function WaiterView() {
         <>
           <div className="cart-bar-spacer" aria-hidden />
           <div className="cart-bar">
-            <button type="button" className="btn btn--primary btn--lg btn--block" onClick={() => setCartOpen(true)}>
-              <span className="row"><ShoppingCartSimpleIcon size={20} aria-hidden /> Заказ{cartQty > 0 && <span className="count" style={{ background: 'var(--on-primary)', color: 'var(--primary)' }}>{cartQty}</span>}</span>
-              <span className="num">{fmt(cartTotal)}</span>
+            <button type="button" className="btn btn--primary btn--lg btn--block" onClick={() => setCartOpen(true)} data-cart-target>
+              <span className="row"><ShoppingCartSimpleIcon size={20} aria-hidden /> Заказ{cartQty > 0 && <span key={cartQty} className="count bump" style={{ background: '#fff', color: 'var(--brand)' }}>{cartQty}</span>}</span>
+              <AnimatedNumber className="num" value={cartTotal} format={fmt} />
             </button>
           </div>
         </>

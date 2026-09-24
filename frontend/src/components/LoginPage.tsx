@@ -1,7 +1,7 @@
-import { useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent, type MouseEvent } from 'react';
 import {
   EyeIcon, EyeSlashIcon, WarningCircleIcon, InfoIcon, CaretRightIcon,
-  ChartBarIcon, CallBellIcon, CookingPotIcon,
+  ChartBarIcon, CallBellIcon, CookingPotIcon, LightningIcon, ChefHatIcon,
 } from '@phosphor-icons/react';
 import { api, tokenStore } from '../api/client';
 import type { User } from '../api/client';
@@ -15,13 +15,27 @@ interface LoginPageProps {
 // Demo accounts are shown only in local development, never on the deployed site.
 const DEMO = import.meta.env.DEV
   ? [
-      { role: 'Администратор', email: 'admin@resto.com',  password: 'admin',  icon: <ChartBarIcon size={18} /> },
-      { role: 'Официант',      email: 'waiter@resto.com', password: 'waiter', icon: <CallBellIcon size={18} /> },
-      { role: 'Повар',         email: 'chef@resto.com',   password: 'chef',   icon: <CookingPotIcon size={18} /> },
+      { role: 'Администратор', email: 'admin@resto.com',  password: 'admin',  tone: 'saffron', icon: <ChartBarIcon size={18} weight="duotone" /> },
+      { role: 'Официант',      email: 'waiter@resto.com', password: 'waiter', tone: 'violet',  icon: <CallBellIcon size={18} weight="duotone" /> },
+      { role: 'Повар',         email: 'chef@resto.com',   password: 'chef',   tone: 'emerald', icon: <CookingPotIcon size={18} weight="duotone" /> },
     ]
   : [];
 
+const HERO_IMAGE = 'https://images.unsplash.com/photo-1529193591184-b1d58069ecdd?auto=format&fit=crop&w=1600&q=80';
+
 export default function LoginPage({ onLogin, notice }: LoginPageProps) {
+  const heroImg = useRef<HTMLDivElement>(null);
+  // Subtle parallax: the photo drifts against the pointer (skipped with reduced motion).
+  const onHeroMove = (e: MouseEvent<HTMLElement>) => {
+    const el = heroImg.current;
+    if (!el || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    const x = (e.clientX - r.left) / r.width - 0.5;
+    const y = (e.clientY - r.top) / r.height - 0.5;
+    el.style.transform = `translate3d(${x * -18}px, ${y * -18}px, 0)`;
+  };
+  const onHeroLeave = () => { if (heroImg.current) heroImg.current.style.transform = ''; };
+
   const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
@@ -50,8 +64,23 @@ export default function LoginPage({ onLogin, notice }: LoginPageProps) {
   const onSubmit = (e: FormEvent) => { e.preventDefault(); signIn(); };
 
   return (
-    <main className="login" id="main">
-      <div className="login__panel">
+    <main className="login login--split" id="main">
+      <section className="login__hero" aria-label="RestaurantOS" onMouseMove={onHeroMove} onMouseLeave={onHeroLeave}>
+        <div ref={heroImg} className="login__hero-img" style={{ backgroundImage: `url("${HERO_IMAGE}")` }} aria-hidden="true" />
+        <div className="login__hero-content">
+          <Brand />
+          <div>
+            <p className="login__slogan reveal">Заказы, кухня и выручка — в одном ритме</p>
+            <ul className="login__points">
+              <li className="reveal" style={{ ['--i' as string]: 2 }}><span className="login__point-icon"><LightningIcon size={18} weight="fill" aria-hidden /></span>Заказ летит на кухню за секунду</li>
+              <li className="reveal" style={{ ['--i' as string]: 3 }}><span className="login__point-icon"><ChefHatIcon size={18} weight="fill" aria-hidden /></span>Повар видит очередь и таймеры</li>
+              <li className="reveal" style={{ ['--i' as string]: 4 }}><span className="login__point-icon"><ChartBarIcon size={18} weight="fill" aria-hidden /></span>Выручка и аналитика вживую</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+      <div className="login__side">
+      <div className="login__panel reveal">
         <div className="login__brand"><Brand /></div>
         <h1 className="login__title">Вход в систему</h1>
         <p className="login__subtitle">Используйте рабочий email и пароль</p>
@@ -114,7 +143,7 @@ export default function LoginPage({ onLogin, notice }: LoginPageProps) {
             <div className="demo__list">
               {DEMO.map((d) => (
                 <button
-                  key={d.email} type="button" className="demo__item" disabled={loading}
+                  key={d.email} type="button" className="demo__item" data-tone={d.tone} disabled={loading}
                   onClick={() => { setEmail(d.email); setPassword(d.password); signIn(d.email, d.password); }}
                 >
                   <span className="demo__icon" aria-hidden="true">{d.icon}</span>
@@ -130,6 +159,7 @@ export default function LoginPage({ onLogin, notice }: LoginPageProps) {
         )}
 
         <p className="login__foot">RestaurantOS · система управления рестораном</p>
+      </div>
       </div>
     </main>
   );

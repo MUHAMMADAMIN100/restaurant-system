@@ -5,7 +5,7 @@ import {
 } from '@phosphor-icons/react';
 import { api } from '../api/client';
 import type { Analytics as AnalyticsData, AnalyticsPeriod, TableBucket, DishBucket, LiveLoad } from '../api/client';
-import { Skeleton, EmptyState, Spinner, StatusBadge } from './UI';
+import { Skeleton, EmptyState, Spinner, StatusBadge, AnimatedNumber } from './UI';
 import { fmt, pluralRu } from '../utils/format';
 import { useOrderSocket, usePaymentSocket, useSocketStatus } from '../hooks/useSocket';
 
@@ -70,7 +70,7 @@ function ColumnChart({ cols, caption, valueLabel, formatAxis, formatValue, highl
               >
                 <div
                   className={`colchart__bar ${highlight === i ? 'is-peak' : ''}`}
-                  style={{ height: `${(c.value / max) * 100}%` }}
+                  style={{ height: `${(c.value / max) * 100}%`, ['--i' as string]: i }}
                 />
               </div>
             ))}
@@ -126,11 +126,13 @@ function Trend({ value }: { value: number | null | undefined }) {
   );
 }
 
-function Kpi({ label, icon, value, foot }: { label: string; icon: ReactNode; value: string; foot: ReactNode }) {
+interface KpiProps { label: string; icon: ReactNode; value: number; format: (n: number) => string; foot: ReactNode; tone: string; hero?: boolean; index: number; }
+function Kpi({ label, icon, value, format, foot, tone, hero, index }: KpiProps) {
   return (
-    <div className="card kpi">
-      <div className="kpi__label"><span aria-hidden style={{ display: 'flex', color: 'var(--text-3)' }}>{icon}</span>{label}</div>
-      <div className="kpi__value">{value}</div>
+    <div className={`card kpi reveal ${hero ? 'kpi--hero' : ''}`} data-tone={tone} style={{ ['--i' as string]: index }}>
+      <span className="kpi__icon" aria-hidden>{icon}</span>
+      <div className="kpi__label">{label}</div>
+      <AnimatedNumber className="kpi__value" value={value} format={format} />
       <div className="kpi__foot">{foot}</div>
     </div>
   );
@@ -153,7 +155,7 @@ function KitchenLoad({ load }: { load: LiveLoad }) {
               <span className="load__value">{r.count}</span>
             </div>
             <div className="hbar__track" style={{ marginTop: 8 }} aria-hidden>
-              <div className="hbar__fill" data-status={r.status} style={{ width: `${(r.count / max) * 100}%`, background: 'var(--st-dot)' }} />
+              <div className="hbar__fill" data-status={r.status} style={{ width: `${(r.count / max) * 100}%`, background: 'var(--st-dot)', ['--i' as string]: rows.indexOf(r) }} />
             </div>
           </div>
         ))}
@@ -176,7 +178,7 @@ function PaymentSplit({ data }: { data: AnalyticsData }) {
       ) : (
         <>
           <div className="split" role="img" aria-label={rows.map((r) => `${r.name}: ${Math.round((r.amount / total) * 100)}%`).join(', ')}>
-            {rows.filter((r) => r.amount > 0).map((r) => <div key={r.key} className="split__seg" style={{ flexGrow: r.amount, background: r.color }} />)}
+            {rows.filter((r) => r.amount > 0).map((r, i) => <div key={r.key} className="split__seg" style={{ flexGrow: r.amount, background: r.color, ['--i' as string]: i }} />)}
           </div>
           <div className="legend">
             {rows.map((r) => (
@@ -210,7 +212,7 @@ function TopDishes({ title, dishes, valueKey }: { title: string; dishes: DishBuc
               <span className="hbar__rank">{i + 1}</span>
               <span className="hbar__name" title={d.name}>{d.name}</span>
               <span className="hbar__value">{format(d)}</span>
-              <span className="hbar__track" aria-hidden><span className="hbar__fill" style={{ display: 'block', width: `${(d[valueKey] / max) * 100}%` }} /></span>
+              <span className="hbar__track" aria-hidden><span className="hbar__fill" style={{ display: 'block', width: `${(d[valueKey] / max) * 100}%`, ['--i' as string]: i }} /></span>
             </li>
           ))}
         </ol>
@@ -349,13 +351,13 @@ export default function Analytics() {
       )}
 
       <div className="kpis">
-        <Kpi label="Выручка" icon={<CoinsIcon size={16} />} value={fmt(data.totalRevenue)}
+        <Kpi index={0} hero tone="saffron" label="Выручка" icon={<CoinsIcon size={20} weight="duotone" />} value={data.totalRevenue} format={fmt}
           foot={cmp?.revenueChange != null ? <><Trend value={cmp.revenueChange} /><span>{vsLabel}</span></> : <span>{periodMeta.sub}</span>} />
-        <Kpi label="Оплачено заказов" icon={<ReceiptIcon size={16} />} value={num.format(data.orderCount)}
+        <Kpi index={1} tone="violet" label="Оплачено заказов" icon={<ReceiptIcon size={20} weight="duotone" />} value={data.orderCount} format={(n) => num.format(Math.round(n))}
           foot={<>{cmp?.orderChange != null && <Trend value={cmp.orderChange} />}<span>{data.tablesServed} {pluralRu(data.tablesServed, ['стол', 'стола', 'столов'])} обслужено</span></>} />
-        <Kpi label="Средний чек" icon={<ChartBarIcon size={16} />} value={fmt(data.avgOrder)}
+        <Kpi index={2} tone="sky" label="Средний чек" icon={<ChartBarIcon size={20} weight="duotone" />} value={data.avgOrder} format={fmt}
           foot={<span>{String(data.avgItemsPerOrder).replace('.', ',')} {pluralRu(Math.round(data.avgItemsPerOrder), ['блюдо', 'блюда', 'блюд'])} в заказе</span>} />
-        <Kpi label="Сейчас в работе" icon={<CookingPotIcon size={16} />} value={num.format(activeNow)}
+        <Kpi index={3} tone="emerald" label="Сейчас в работе" icon={<CookingPotIcon size={20} weight="duotone" />} value={activeNow} format={(n) => num.format(Math.round(n))}
           foot={<span>{data.liveLoad.ready} {pluralRu(data.liveLoad.ready, ['ждёт', 'ждут', 'ждут'])} оплаты</span>} />
       </div>
 

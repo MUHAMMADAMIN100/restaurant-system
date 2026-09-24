@@ -67,14 +67,14 @@ function useChime() {
 }
 
 // ── Order card ────────────────────────────────────────────────────────────────
-interface CardProps { order: Order; now: number; busy: boolean; onAdvance: (o: Order) => void; }
-function KitchenCard({ order, now, busy, onAdvance }: CardProps) {
+interface CardProps { order: Order; now: number; busy: boolean; fresh: boolean; onAdvance: (o: Order) => void; }
+function KitchenCard({ order, now, busy, fresh, onAdvance }: CardProps) {
   const mins = minutesSince(order.createdAt, now);
   const lateAfter = LATE_AFTER[order.status];
   const late = lateAfter !== undefined && mins >= lateAfter;
 
   return (
-    <article className={`kds-card ${late ? 'is-late' : ''}`} data-status={order.status} aria-label={`Стол ${order.tableNumber}, заказ ${order.id}`}>
+    <article className={`kds-card reveal ${fresh ? 'is-fresh' : ''} ${late ? 'is-late' : ''}`} data-status={order.status} aria-label={`Стол ${order.tableNumber}, заказ ${order.id}`}>
       <div className="kds-card__head">
         <div>
           <div className="kds-card__table">Стол {order.tableNumber}</div>
@@ -120,6 +120,7 @@ export default function ChefView() {
   const [loadError, setLoadError] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [advancing, setAdvancing] = useState<number | null>(null);
+  const [fresh, setFresh] = useState<Set<number>>(() => new Set());
   const [soundOn, setSoundOn]     = useState(() => { try { return localStorage.getItem(SOUND_KEY) !== 'off'; } catch { return true; } });
   const toast = useToast();
   const now = useNow(15000);
@@ -144,6 +145,9 @@ export default function ChefView() {
   useOrderSocket({
     onNew: (o) => {
       setOrders((p) => upsertById(p, o, 'start'));
+      // Highlight the new ticket for a few seconds.
+      setFresh((s) => new Set(s).add(o.id));
+      window.setTimeout(() => setFresh((s) => { const n = new Set(s); n.delete(o.id); return n; }), 6000);
       if (soundRef.current) chime();
       toast(`Новый заказ: стол ${o.tableNumber}`);
     },
@@ -219,11 +223,11 @@ export default function ChefView() {
             <section key={status} className="kds-col" aria-label={title}>
               <h2 className="kds-col__head" data-status={status}>
                 {title}
-                <span className="count">{col.length}</span>
+                <span key={col.length} className="count bump">{col.length}</span>
               </h2>
               {col.length === 0
                 ? <div className="kds-empty">Пусто</div>
-                : col.map((o) => <KitchenCard key={o.id} order={o} now={now} busy={advancing === o.id} onAdvance={advance} />)}
+                : col.map((o) => <KitchenCard key={o.id} order={o} now={now} busy={advancing === o.id} fresh={fresh.has(o.id)} onAdvance={advance} />)}
             </section>
           );
         })}

@@ -8,6 +8,7 @@ import {
 } from '@phosphor-icons/react';
 import type { OrderStatus, User } from '../api/client';
 import { STATUS_LABEL, initials } from '../utils/format';
+import { useCountUp } from '../hooks/useCountUp';
 
 // ── Spinner & skeleton ───────────────────────────────────────────────────────
 export function Spinner({ size = 16, label }: { size?: number; label?: string }) {
@@ -214,6 +215,17 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         document.body,
       )}
     </ToastContext.Provider>
+  );
+}
+
+// ── Animated number (count-up) ───────────────────────────────────────────────
+export function AnimatedNumber({ value, format, className }: { value: number; format: (n: number) => string; className?: string }) {
+  const shown = useCountUp(value);
+  return (
+    <span className={className}>
+      <span aria-hidden="true">{format(Math.abs(shown - value) < 0.005 ? value : shown)}</span>
+      <span className="sr-only">{format(value)}</span>
+    </span>
   );
 }
 

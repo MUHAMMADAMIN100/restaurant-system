@@ -9,6 +9,7 @@ import { Modal, Spinner, useToast, EmptyState, Skeleton, ConfirmDialog, Brand, U
 import { fmt, pluralRu, upsertById } from '../utils/format';
 import { useMenuSocket, useCategorySocket, useSocketStatus } from '../hooks/useSocket';
 import Analytics from './Analytics';
+import { categoryStyle } from '../utils/category';
 
 type Section = 'analytics' | 'menu' | 'categories';
 const SECTIONS: { key: Section; label: string; icon: JSX.Element }[] = [
@@ -20,6 +21,11 @@ const sectionFromHash = (): Section => {
   const h = window.location.hash.replace('#', '');
   return (SECTIONS.some((s) => s.key === h) ? h : 'analytics') as Section;
 };
+
+function CategoryPill({ name, id }: { name: string; id: number | null }) {
+  const { tone, Icon } = categoryStyle(name, id);
+  return <span className="tone-pill" data-tone={tone}><Icon size={12} weight="bold" aria-hidden />{name}</span>;
+}
 
 function Thumb({ src }: { src: string | null }) {
   const [failed, setFailed] = useState(false);
@@ -234,8 +240,8 @@ function MenuSection({ menu, categories, onSave, onToggle, onDelete, initialCat 
                   </tr>
                 </thead>
                 <tbody>
-                  {shown.map((item) => (
-                    <tr key={item.id}>
+                  {shown.map((item, idx) => (
+                    <tr key={item.id} className="reveal" style={{ ['--i' as string]: idx }}>
                       <td>
                         <div className="dish-cell">
                           <Thumb src={item.imageUrl} />
@@ -245,7 +251,7 @@ function MenuSection({ menu, categories, onSave, onToggle, onDelete, initialCat 
                           </div>
                         </div>
                       </td>
-                      <td className="muted">{catName(item)}</td>
+                      <td><CategoryPill name={catName(item)} id={item.categoryId} /></td>
                       <td className="col-num"><strong style={{ fontWeight: 600 }}>{fmt(item.price)}</strong></td>
                       <td>
                         <label className="switch">
@@ -264,8 +270,8 @@ function MenuSection({ menu, categories, onSave, onToggle, onDelete, initialCat 
             </div>
 
             <ul className="mlist only-mobile">
-              {shown.map((item) => (
-                <li key={item.id} className="mlist__item">
+              {shown.map((item, idx) => (
+                <li key={item.id} className="mlist__item reveal" style={{ ['--i' as string]: idx }}>
                   <Thumb src={item.imageUrl} />
                   <div style={{ minWidth: 0 }}>
                     <div className="dish-cell__name" style={{ overflowWrap: 'anywhere' }}>{item.name}</div>
@@ -360,11 +366,12 @@ function CategoriesSection({ categories, menu, onSave, onDelete, onShowDishes }:
             action={<button className="btn btn--primary" onClick={() => open('new')}><PlusIcon size={16} aria-hidden /> Новая категория</button>} />
         ) : (
           <ul className="cat-list">
-            {categories.map((c) => {
+            {categories.map((c, idx) => {
               const n = count(c);
+              const { tone, Icon } = categoryStyle(c.name, c.id);
               return (
-                <li key={c.id} className="cat-row">
-                  <span className="cat-row__icon" aria-hidden><TagIcon size={18} /></span>
+                <li key={c.id} className="cat-row reveal" data-tone={tone} style={{ ['--i' as string]: idx }}>
+                  <span className="cat-row__icon" aria-hidden><Icon size={20} weight="duotone" /></span>
                   <div style={{ minWidth: 0 }}>
                     <div className="cat-row__name">{c.name}</div>
                     <button type="button" className="cat-row__count" onClick={() => onShowDishes(c)} style={{ background: 'none', border: 0, padding: 0, textDecoration: n ? 'underline' : 'none', textUnderlineOffset: 3 }} disabled={!n}>
@@ -585,7 +592,7 @@ export default function AdminView({ user, onLogout }: { user: User; onLogout: ()
           </div>
         </nav>
         <main id="main" className="page" tabIndex={-1} style={{ outline: 'none' }}>
-          {content()}
+          <div key={section} className="page-enter">{content()}</div>
         </main>
       </div>
     </div>
