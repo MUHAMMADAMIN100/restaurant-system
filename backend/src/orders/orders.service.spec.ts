@@ -1,8 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { OrdersService } from './orders.module';
+import { OrdersService, orderTotal } from './orders.module';
 import { Order, OrderItem, OrderStatus } from './order.entity';
+import { MenuItem } from '../menu/menu-item.entity';
 import { OrdersGateway } from '../gateway/orders.gateway';
 
 const mockOrder = (status: OrderStatus): Order => ({
@@ -13,21 +14,29 @@ const mockOrder = (status: OrderStatus): Order => ({
   createdAt: new Date(),
 });
 
+const dish = (over: Partial<MenuItem> = {}): MenuItem => ({
+  id: 1, name: 'Плов', price: 55, categoryId: 1, category: null,
+  isAvailable: true, isArchived: false, description: null, imageUrl: null,
+  ...over,
+});
+
 describe('OrdersService', () => {
   let service: OrdersService;
   let orderRepo: any;
   let itemRepo: any;
+  let menuRepo: any;
   let gateway: jest.Mocked<Pick<OrdersGateway, 'emitNewOrder' | 'emitStatusChange' | 'emitOrderClosed'>>;
 
   beforeEach(async () => {
     orderRepo = {
       find: jest.fn(),
       findOne: jest.fn(),
-      create: jest.fn(),
+      create: jest.fn((x) => x),
       save: jest.fn(),
       update: jest.fn(),
     };
-    itemRepo = { create: jest.fn() };
+    itemRepo = { create: jest.fn((x) => x) };
+    menuRepo = { find: jest.fn() };
     gateway = {
       emitNewOrder: jest.fn(),
       emitStatusChange: jest.fn(),
@@ -39,6 +48,7 @@ describe('OrdersService', () => {
         OrdersService,
         { provide: getRepositoryToken(Order), useValue: orderRepo },
         { provide: getRepositoryToken(OrderItem), useValue: itemRepo },
+        { provide: getRepositoryToken(MenuItem), useValue: menuRepo },
         { provide: OrdersGateway, useValue: gateway },
       ],
     }).compile();
@@ -67,10 +77,9 @@ describe('OrdersService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
-    it('должен создать заказ и эмитить WebSocket событие', async () => {
+    it('должен создать заказ, зафиксировать цену и эмитить WebSocket событие', async () => {
       const order = mockOrder(OrderStatus.PENDING);
-      itemRepo.create.mockReturnValue({});
-      orderRepo.create.mockReturnValue(order);
+      menuRepo.find.mockResolvedValue([dish({ id: 1, price: 55 })]);
       orderRepo.save.mockResolvedValue(order);
       orderRepo.findOne.mockResolvedValue(order);
 
@@ -80,7 +89,34 @@ describe('OrdersService', () => {
       });
 
       expect(result).toBe(order);
+      expect(itemRepo.create).toHaveBeenCalledWith({ menuItemId: 1, quantity: 2, price: 55 });
       expect(gateway.emitNewOrder).toHaveBeenCalledWith(order);
+    });
+
+    it('должен объединить повторяющиеся позиции', async () => {
+      menuRepo.find.mockResolvedValue([dish({ id: 1 })]);
+      orderRepo.save.mockResolvedValue(mockOrder(OrderStatus.PENDING));
+      orderRepo.findOne.mockResolvedValue(mockOrder(OrderStatus.PENDING));
+
+      await service.create({ tableNumber: 3, items: [{ menuItemId: 1, quantity: 1 }, { menuItemId: 1, quantity: 2 }] });
+
+      expect(itemRepo.create).toHaveBeenCalledTimes(1);
+      expect(itemRepo.create).toHaveBeenCalledWith(expect.objectContaining({ menuItemId: 1, quantity: 3 }));
+    });
+
+    it('должен отклонить заказ с несуществующим блюдом', async () => {
+      menuRepo.find.mockResolvedValue([]);
+      await expect(
+        service.create({ tableNumber: 3, items: [{ menuItemId: 999, quantity: 1 }] }),
+      ).rejects.toThrow(BadRequestException);
+      expect(orderRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('должен отклонить заказ с недоступным блюдом', async () => {
+      menuRepo.find.mockResolvedValue([dish({ id: 1, name: 'Плов', isAvailable: false })]);
+      await expect(
+        service.create({ tableNumber: 3, items: [{ menuItemId: 1, quantity: 1 }] }),
+      ).rejects.toThrow('Сейчас недоступно: Плов');
     });
   });
 
@@ -104,15 +140,24 @@ describe('OrdersService', () => {
       expect(gateway.emitStatusChange).toHaveBeenCalled();
     });
 
-    it('должен эмитить order:closed при переходе в CLOSED', async () => {
-      const closed = mockOrder(OrderStatus.CLOSED);
-      orderRepo.findOne
-        .mockResolvedValueOnce(mockOrder(OrderStatus.READY))
-        .mockResolvedValueOnce(closed);
-      orderRepo.update.mockResolvedValue({});
+    it('должен запретить закрыть заказ без оплаты (READY → CLOSED)', async () => {
+      orderRepo.findOne.mockResolvedValue(mockOrder(OrderStatus.READY));
+      await expect(
+        service.updateStatus(1, { status: OrderStatus.CLOSED }),
+      ).rejects.toThrow(BadRequestException);
+      expect(orderRepo.update).not.toHaveBeenCalled();
+    });
+  });
 
-      await service.updateStatus(1, { status: OrderStatus.CLOSED });
-      expect(gateway.emitOrderClosed).toHaveBeenCalled();
+  describe('orderTotal', () => {
+    it('считает по зафиксированной цене, а для старых позиций — по цене блюда', () => {
+      const total = orderTotal({
+        items: [
+          { price: 55, quantity: 2, menuItem: { price: 999 } },
+          { price: null, quantity: 1, menuItem: { price: 12.5 } },
+        ] as any,
+      });
+      expect(total).toBe(122.5);
     });
   });
 });

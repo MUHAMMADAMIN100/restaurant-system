@@ -28,9 +28,7 @@ export class OrdersGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     try {
-      const payload = this.jwtService.verify(token, {
-        secret: process.env.JWT_SECRET || 'secret',
-      });
+      const payload = this.jwtService.verify(token);
       client.data.user = payload;
       console.log(`WS connected: ${client.id} (${payload.email})`);
     } catch {

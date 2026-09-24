@@ -1,11 +1,20 @@
-import { Module, Injectable, Controller, Get, Post, Patch, Delete, Body, Param, ParseIntPipe, UseGuards, NotFoundException, forwardRef } from '@nestjs/common';
+import { Module, Injectable, Controller, Get, Post, Patch, Delete, Body, Param, ParseIntPipe, UseGuards, NotFoundException, ConflictException, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { IsString, MinLength } from 'class-validator';
+import { IsString, MinLength, MaxLength } from 'class-validator';
 import { JwtAuthGuard, RolesGuard, Roles } from '../auth/auth.module';
 import { UserRole } from '../users/user.entity';
 import { Category } from './category.entity';
+import { MenuItem } from '../menu/menu-item.entity';
+
+function plural(n: number, forms: [string, string, string]) {
+  const m10 = n % 10, m100 = n % 100;
+  if (m100 >= 11 && m100 <= 14) return forms[2];
+  if (m10 === 1) return forms[0];
+  if (m10 >= 2 && m10 <= 4) return forms[1];
+  return forms[2];
+}
 import { OrdersModule } from '../orders/orders.module';
 import { OrdersGateway } from '../gateway/orders.gateway';
 
@@ -15,12 +24,14 @@ export { Category };
 export class CreateCategoryDto {
   @IsString()
   @MinLength(1)
+  @MaxLength(100)
   name!: string;
 }
 
 export class UpdateCategoryDto {
   @IsString()
   @MinLength(1)
+  @MaxLength(100)
   name!: string;
 }
 
@@ -56,6 +67,12 @@ export class CategoriesService {
 
   async remove(id: number) {
     await this.findOne(id);
+    const dishes = await this.repo.manager.getRepository(MenuItem).count({ where: { categoryId: id, isArchived: false } });
+    if (dishes > 0) {
+      throw new ConflictException(
+        `В категории ${dishes} ${plural(dishes, ['блюдо', 'блюда', 'блюд'])}. Перенесите их в другую категорию или удалите, затем удалите категорию.`,
+      );
+    }
     await this.repo.delete(id);
     this.gateway.emitCategoryDeleted(id);
     return { message: 'Удалено' };

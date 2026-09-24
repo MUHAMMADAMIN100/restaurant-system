@@ -32,7 +32,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: process.env.JWT_SECRET || 'secret',
+      secretOrKey: process.env.JWT_SECRET as string,
     });
   }
 
@@ -86,10 +86,9 @@ export class AuthService {
       .where('u.email = :email', { email: dto.email })
       .getOne();
 
-    if (!user) throw new UnauthorizedException('Пользователь не найден');
-
-    const valid = await bcrypt.compare(dto.password, user.password);
-    if (!valid) throw new UnauthorizedException('Неверный пароль');
+    // Same message for both cases so the response doesn't reveal which emails exist.
+    const valid = user ? await bcrypt.compare(dto.password, user.password) : false;
+    if (!user || !valid) throw new UnauthorizedException('Неверный email или пароль');
 
     const payload = { sub: user.id, email: user.email, role: user.role };
     const token = this.jwtService.sign(payload);
@@ -127,7 +126,7 @@ export class AuthController {
     PassportModule,
     JwtModule.registerAsync({
       useFactory: () => ({
-        secret: process.env.JWT_SECRET || 'secret',
+        secret: process.env.JWT_SECRET as string,
         signOptions: { expiresIn: process.env.JWT_EXPIRES || '7d' },
       }),
     }),

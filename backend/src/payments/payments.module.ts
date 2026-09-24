@@ -1,23 +1,23 @@
 import {
-  Module, Injectable, Controller, Get, Post, Body, Param, ParseIntPipe,
-  UseGuards, NotFoundException, BadRequestException, Query,
+  Module, Injectable, Controller, Get, Post, Body,
+  UseGuards, BadRequestException, ConflictException, Query,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
+import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { IsNumber, IsEnum, Min } from 'class-validator';
+import { DataSource, Repository } from 'typeorm';
+import { IsInt, IsEnum } from 'class-validator';
 import { Type } from 'class-transformer';
 import { JwtAuthGuard, RolesGuard, Roles } from '../auth/auth.module';
 import { UserRole } from '../users/user.entity';
 import { Payment, PaymentType } from './payment.entity';
-import { OrdersService } from '../orders/orders.module';
-import { OrderStatus } from '../orders/order.entity';
+import { OrdersService, orderTotal } from '../orders/orders.module';
+import { Order, OrderItem, OrderStatus } from '../orders/order.entity';
 import { OrdersGateway } from '../gateway/orders.gateway';
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
+// The amount is not accepted from the client: the server computes it from the order.
 export class CreatePaymentDto {
-  @IsNumber() @Type(() => Number) orderId!: number;
-  @IsNumber() @Min(0) @Type(() => Number) amount!: number;
+  @IsInt() @Type(() => Number) orderId!: number;
   @IsEnum(PaymentType) type!: PaymentType;
 }
 
@@ -26,6 +26,7 @@ export class CreatePaymentDto {
 export class PaymentsService {
   constructor(
     @InjectRepository(Payment) private repo: Repository<Payment>,
+    @InjectDataSource() private dataSource: DataSource,
     private ordersService: OrdersService,
     private gateway: OrdersGateway,
   ) {}
@@ -35,20 +36,34 @@ export class PaymentsService {
   }
 
   async create(dto: CreatePaymentDto) {
-    const order = await this.ordersService.findOne(dto.orderId);
+    const payment = await this.dataSource.transaction(async (manager) => {
+      // Row lock serialises concurrent payments for the same order.
+      const order = await manager
+        .getRepository(Order)
+        .createQueryBuilder('o')
+        .setLock('pessimistic_write')
+        .where('o.id = :id', { id: dto.orderId })
+        .getOne();
+      if (!order) throw new BadRequestException('Заказ не найден');
+      if (order.status === OrderStatus.CLOSED) throw new ConflictException('Этот заказ уже оплачен');
+      if (order.status !== OrderStatus.READY) {
+        throw new BadRequestException('Оплатить можно только готовый заказ');
+      }
 
-    if (order.status !== OrderStatus.READY) {
-      throw new BadRequestException('Можно оплатить только готовый заказ (READY)');
-    }
+      const items = await manager.getRepository(OrderItem).find({ where: { orderId: order.id } });
+      const amount = orderTotal({ items });
+      if (amount <= 0) throw new BadRequestException('Сумма заказа равна нулю');
 
-    const payment = await this.repo.save(
-      this.repo.create({ ...dto }),
-    );
+      const saved = await manager.getRepository(Payment).save(
+        manager.getRepository(Payment).create({ orderId: order.id, amount, type: dto.type }),
+      );
+      await manager.getRepository(Order).update(order.id, { status: OrderStatus.CLOSED });
+      return saved;
+    });
 
-    // Close the order
-    await this.ordersService.updateStatus(dto.orderId, { status: OrderStatus.CLOSED });
+    const closed = await this.ordersService.findOne(dto.orderId);
+    this.gateway.emitOrderClosed(closed);
     this.gateway.emitPaymentCreated(payment);
-
     return payment;
   }
 
@@ -91,7 +106,8 @@ export class PaymentsService {
         return t >= d && t < next;
       });
       revenueByDay.push({
-        date: d.toISOString().slice(0, 10),
+        // Local calendar date (toISOString would shift it to UTC and mislabel the day).
+        date: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
         revenue: dayPayments.reduce((s, p) => s + Number(p.amount), 0),
         orders: dayPayments.length,
       });
@@ -141,7 +157,7 @@ export class PaymentsService {
     for (const p of payments) {
       for (const it of p.order?.items || []) {
         const name = it.menuItem?.name || '—';
-        const price = Number(it.menuItem?.price || 0);
+        const price = Number(it.price ?? it.menuItem?.price ?? 0);
         if (!dishMap[name]) dishMap[name] = { name, quantity: 0, revenue: 0 };
         dishMap[name].quantity += it.quantity;
         dishMap[name].revenue  += price * it.quantity;
@@ -151,7 +167,8 @@ export class PaymentsService {
     const topDishesByQuantity = Object.values(dishMap).sort((a, b) => b.quantity - a.quantity).slice(0, 8);
 
     // ── Period comparison (vs previous period) ───────────────────────────
-    let comparison: { revenueChange: number; orderChange: number } | null = null;
+    // null when the previous period had nothing to compare with (a percentage would be meaningless).
+    let comparison: { revenueChange: number | null; orderChange: number | null } | null = null;
     if (period !== 'all') {
       const periodMs = now.getTime() - since.getTime();
       const prevSince = new Date(since.getTime() - periodMs);
@@ -162,8 +179,8 @@ export class PaymentsService {
       const prevRevenue = prev.reduce((s, p) => s + Number(p.amount), 0);
       const prevCount   = prev.length;
       comparison = {
-        revenueChange: prevRevenue ? Math.round(((totalRevenue - prevRevenue) / prevRevenue) * 100) : 0,
-        orderChange:   prevCount   ? Math.round(((count - prevCount) / prevCount) * 100) : 0,
+        revenueChange: prevRevenue ? Math.round(((totalRevenue - prevRevenue) / prevRevenue) * 100) : null,
+        orderChange:   prevCount   ? Math.round(((count - prevCount) / prevCount) * 100) : null,
       };
     }
 

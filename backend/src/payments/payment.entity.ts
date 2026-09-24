@@ -11,7 +11,8 @@ export class Payment {
   @PrimaryGeneratedColumn()
   id!: number;
 
-  @Column()
+  // One payment per order.
+  @Column({ unique: true })
   orderId!: number;
 
   @ManyToOne(() => Order, { eager: true, onDelete: 'CASCADE' })

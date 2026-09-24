@@ -378,7 +378,7 @@ async function seed() {
         imageUrl: U('1490474418585-ba9bad8fd0ea'),
       },
     ]));
-    console.log('✅ Menu items created (35 items)');
+    console.log(`✅ Menu items created (${await menuRepo.count()} items)`);
   }
 
   await AppDataSource.destroy();

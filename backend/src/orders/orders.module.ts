@@ -4,35 +4,56 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { IsNumber, IsArray, ValidateNested, Min, IsEnum, IsOptional } from 'class-validator';
+import { In, Repository } from 'typeorm';
+import { IsInt, IsArray, ValidateNested, Min, Max, IsEnum, ArrayMinSize, ArrayMaxSize } from 'class-validator';
 import { Type } from 'class-transformer';
 import { JwtAuthGuard, RolesGuard, Roles } from '../auth/auth.module';
 import { UserRole } from '../users/user.entity';
 import { Order, OrderItem, OrderStatus } from './order.entity';
+import { MenuItem } from '../menu/menu-item.entity';
 import { OrdersGateway } from '../gateway/orders.gateway';
+
+export const MAX_TABLE_NUMBER = 50;
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 export class OrderItemDto {
-  @IsNumber() @Type(() => Number) menuItemId!: number;
-  @IsNumber() @Min(1) @Type(() => Number) quantity!: number;
+  @IsInt() @Type(() => Number) menuItemId!: number;
+  @IsInt() @Min(1) @Max(99) @Type(() => Number) quantity!: number;
 }
 
 export class CreateOrderDto {
-  @IsNumber() @Min(1) @Type(() => Number) tableNumber!: number;
-  @IsArray() @ValidateNested({ each: true }) @Type(() => OrderItemDto) items!: OrderItemDto[];
+  @IsInt() @Min(1) @Max(MAX_TABLE_NUMBER) @Type(() => Number) tableNumber!: number;
+  @IsArray() @ArrayMinSize(1, { message: 'Заказ пустой' }) @ArrayMaxSize(100)
+  @ValidateNested({ each: true }) @Type(() => OrderItemDto) items!: OrderItemDto[];
 }
 
 export class UpdateStatusDto {
   @IsEnum(OrderStatus) status!: OrderStatus;
 }
 
+// Kitchen workflow only. CLOSED is reachable exclusively through a payment (PaymentsService).
+export const KITCHEN_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
+  [OrderStatus.PENDING]: [OrderStatus.COOKING],
+  [OrderStatus.COOKING]: [OrderStatus.READY],
+  [OrderStatus.READY]:   [],
+  [OrderStatus.CLOSED]:  [],
+};
+
+export const orderTotal = (order: Pick<Order, 'items'>): number =>
+  Math.round(
+    (order.items ?? []).reduce(
+      (sum, it) => sum + Number(it.price ?? it.menuItem?.price ?? 0) * it.quantity,
+      0,
+    ) * 100,
+  ) / 100;
+
 // ── Service ──────────────────────────────────────────────────────────────────
 @Injectable()
 export class OrdersService {
   constructor(
-    @InjectRepository(Order)    private orderRepo: Repository<Order>,
+    @InjectRepository(Order)     private orderRepo: Repository<Order>,
     @InjectRepository(OrderItem) private itemRepo: Repository<OrderItem>,
+    @InjectRepository(MenuItem)  private menuRepo: Repository<MenuItem>,
     private gateway: OrdersGateway,
   ) {}
 
@@ -50,11 +71,28 @@ export class OrdersService {
   async create(dto: CreateOrderDto) {
     if (!dto.items?.length) throw new BadRequestException('Заказ пустой');
 
+    // Merge duplicate lines so one dish appears once per order.
+    const quantities = new Map<number, number>();
+    for (const i of dto.items) quantities.set(i.menuItemId, (quantities.get(i.menuItemId) ?? 0) + i.quantity);
+
+    const ids = [...quantities.keys()];
+    const dishes = await this.menuRepo.find({ where: { id: In(ids), isArchived: false } });
+    const byId = new Map(dishes.map((d) => [d.id, d]));
+
+    const missing = ids.filter((id) => !byId.has(id));
+    if (missing.length) {
+      throw new BadRequestException('Некоторых блюд уже нет в меню. Обновите страницу и соберите заказ заново.');
+    }
+    const unavailable = dishes.filter((d) => !d.isAvailable);
+    if (unavailable.length) {
+      throw new BadRequestException(`Сейчас недоступно: ${unavailable.map((d) => d.name).join(', ')}`);
+    }
+
     const order = this.orderRepo.create({
       tableNumber: dto.tableNumber,
       status: OrderStatus.PENDING,
-      items: dto.items.map((i) =>
-        this.itemRepo.create({ menuItemId: i.menuItemId, quantity: i.quantity }),
+      items: ids.map((id) =>
+        this.itemRepo.create({ menuItemId: id, quantity: quantities.get(id)!, price: Number(byId.get(id)!.price) }),
       ),
     });
 
@@ -67,26 +105,14 @@ export class OrdersService {
   async updateStatus(id: number, dto: UpdateStatusDto) {
     const order = await this.findOne(id);
 
-    // Enforce valid transitions
-    const transitions: Record<OrderStatus, OrderStatus[]> = {
-      [OrderStatus.PENDING]: [OrderStatus.COOKING],
-      [OrderStatus.COOKING]: [OrderStatus.READY],
-      [OrderStatus.READY]:   [OrderStatus.CLOSED],
-      [OrderStatus.CLOSED]:  [],
-    };
-
-    if (!transitions[order.status].includes(dto.status)) {
-      throw new BadRequestException(
-        `Нельзя перейти из ${order.status} в ${dto.status}`,
-      );
+    if (!KITCHEN_TRANSITIONS[order.status].includes(dto.status)) {
+      const hint = dto.status === OrderStatus.CLOSED ? ' Заказ закрывается только после оплаты.' : '';
+      throw new BadRequestException(`Нельзя перейти из ${order.status} в ${dto.status}.${hint}`);
     }
 
     await this.orderRepo.update(id, { status: dto.status });
     const updated = await this.findOne(id);
-
-    if (dto.status === OrderStatus.CLOSED) this.gateway.emitOrderClosed(updated);
-    else this.gateway.emitStatusChange(updated);
-
+    this.gateway.emitStatusChange(updated);
     return updated;
   }
 }
@@ -97,7 +123,14 @@ export class OrdersService {
 export class OrdersController {
   constructor(private service: OrdersService) {}
 
-  @Get()    findAll(@Query('status') status?: OrderStatus) { return this.service.findAll(status); }
+  @Get()
+  findAll(@Query('status') status?: string) {
+    if (status !== undefined && !Object.values(OrderStatus).includes(status as OrderStatus)) {
+      throw new BadRequestException('Неизвестный статус заказа');
+    }
+    return this.service.findAll(status as OrderStatus | undefined);
+  }
+
   @Get(':id') findOne(@Param('id', ParseIntPipe) id: number) { return this.service.findOne(id); }
 
   @Post()
@@ -105,7 +138,7 @@ export class OrdersController {
   create(@Body() dto: CreateOrderDto) { return this.service.create(dto); }
 
   @Patch(':id/status')
-  @Roles(UserRole.ADMIN, UserRole.CHEF, UserRole.WAITER)
+  @Roles(UserRole.ADMIN, UserRole.CHEF)
   updateStatus(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateStatusDto) {
     return this.service.updateStatus(id, dto);
   }
@@ -114,7 +147,7 @@ export class OrdersController {
 // ── Module ───────────────────────────────────────────────────────────────────
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Order, OrderItem]),
+    TypeOrmModule.forFeature([Order, OrderItem, MenuItem]),
     require('../auth/auth.module').AuthModule,
   ],
   providers: [OrdersService, OrdersGateway],

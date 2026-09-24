@@ -47,4 +47,8 @@ export class OrderItem {
 
   @Column()
   quantity!: number;
+
+  // Price snapshot at the moment of ordering; null only for orders created before this column existed.
+  @Column('decimal', { precision: 12, scale: 2, nullable: true })
+  price!: number | null;
 }
